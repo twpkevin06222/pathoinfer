@@ -131,7 +131,7 @@ def run_slide(cfg: RunConfig, path: Path, model: Model | None = None) -> RunResu
     logger.debug(
         "{}: {} tiles in a {} x {} grid", path.name, len(grid.tiles), grid.n_rows, grid.n_cols
     )
-    output_mpp = _output_mpp(cfg, grid) if cfg.task == "segmentation" else None
+    output_mpp = segmentation_output_mpp(cfg, grid) if cfg.task == "segmentation" else None
     loader = make_loader(
         grid,
         cfg.runtime.batch_size,
@@ -140,7 +140,7 @@ def run_slide(cfg: RunConfig, path: Path, model: Model | None = None) -> RunResu
         persistent_workers=False,
     )
     try:
-        thread = StitchThread(_stitcher(cfg, card, grid, output_mpp), STITCH_QUEUE)
+        thread = StitchThread(make_stitcher(cfg, card, grid, output_mpp), STITCH_QUEUE)
         result, tiles = stream(loader, model.runtime, thread, timings)
     finally:
         loader.dataset.close()  # type: ignore[attr-defined]  # TileDataset; open with 0 workers
@@ -272,11 +272,11 @@ def _batch_frame(results: list[RunResult], settings_hash: str) -> pl.DataFrame:
     return pl.DataFrame(rows, infer_schema_length=None)
 
 
-def _output_mpp(cfg: RunConfig, grid: SlideGrid) -> float:
+def segmentation_output_mpp(cfg: RunConfig, grid: SlideGrid) -> float:
     return cfg.segmentation.output_mpp or max(2.0, grid.mpp)
 
 
-def _stitcher(
+def make_stitcher(
     cfg: RunConfig, card: ModelCard, grid: SlideGrid, output_mpp: float | None
 ) -> Stitcher:
     if isinstance(card, SegmentationCard):
@@ -286,7 +286,9 @@ def _stitcher(
             grid,
             output_mpp=output_mpp,
             simplify_px=cfg.segmentation.simplify_px,
+            smooth=cfg.segmentation.smooth,
             min_area_um2=cfg.segmentation.min_area_um2,
+            fill_holes_um2=cfg.segmentation.fill_holes_um2,
             keep_labels=cfg.outputs.tiff,
         )
     if not isinstance(card, DetectionCard):

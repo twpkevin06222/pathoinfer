@@ -92,7 +92,7 @@ statistics, row groups of 100,000 rows.
 | `centroid_x`, `centroid_y` | float64 | Geometry centroid, level-0 px |
 | `bbox_x0`, `bbox_y0`, `bbox_x1`, `bbox_y1` | float64 | Geometry bounds, level-0 px |
 | `area_um2` | float64 | Region area; a detection's box area, also for point output |
-| measurements | float64 | Segmentation: `perimeter_um`, `mean_probability`. Detection with a `class_probs` output: `prob_<class>` per class |
+| measurements | float64 | Segmentation: `perimeter_um`, `mean_probability` (over the region's predicted pixels, not filled holes). Detection with a `class_probs` output: `prob_<class>` per class |
 | `geometry` | binary | WKB, level-0 px. Decode with `shapely.from_wkb` |
 | `model_name`, `model_version` | string | |
 

@@ -28,7 +28,10 @@ loader:
 segmentation:
   output_mpp: null                # polygonise at this mpp; null: 2.0, or the model's if coarser
   simplify_px: 1.5                # Douglas-Peucker tolerance, output pixels
-  min_area_um2: 50                # drop smaller regions
+  smooth: 2                       # Chaikin rounds rounding off pixel steps; 0: pixel edges
+  min_area_um2: 50                # remove small objects: drop regions smaller than this
+  fill_holes_um2: 200             # fill holes smaller than this (.inf: all); holes holding
+                                  # another class are kept
 
 outputs:
   dir: outputs/segmentation

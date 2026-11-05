@@ -19,7 +19,6 @@ import yaml
 from pathoinfer.cli import main
 from pathoinfer.config import RunConfig
 from pathoinfer.engine.pipeline import load, run_batch, run_slide
-from tests.tiling.conftest import write_pyramid
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 MPP = 4.0
@@ -30,14 +29,6 @@ def model(tmp_path: Path, fixture: str) -> Path:
     card = json.loads((folder / "model_card.json").read_text())
     card["input"]["mpp"] = MPP
     (folder / "model_card.json").write_text(json.dumps(card))
-    return folder
-
-
-@pytest.fixture(scope="module")
-def slides(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    folder = tmp_path_factory.mktemp("slides")
-    write_pyramid(folder / "slide_name-01.tiff", 0.25)
-    write_pyramid(folder / "slide_name-02.tiff", None)  # no resolution: refused
     return folder
 
 
