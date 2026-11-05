@@ -289,6 +289,7 @@ def make_stitcher(
             smooth=cfg.segmentation.smooth,
             min_area_um2=cfg.segmentation.min_area_um2,
             fill_holes_um2=cfg.segmentation.fill_holes_um2,
+            connectivity=cfg.segmentation.connectivity,
             keep_labels=cfg.outputs.tiff,
         )
     if not isinstance(card, DetectionCard):

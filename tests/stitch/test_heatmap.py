@@ -122,7 +122,8 @@ def test_tiles_become_core_objects_with_class_probabilities() -> None:
 
 def test_threshold_regions_follow_the_checkerboard() -> None:
     _, result = run(checkerboard, thresholds={"tumour": 0.5}, simplify_px=0, smooth=0)
-    (region,) = result.features  # the four tumour blocks touch at corners: one region
+    # The four tumour blocks touch only at corners: one region with 8-connectivity.
+    (region,) = result.features
     assert region.class_name == "tumour"
     scale, origin = STRIDE * DOWNSAMPLE, OVERLAP // 2 * DOWNSAMPLE
     cells = [
@@ -136,22 +137,30 @@ def test_threshold_regions_follow_the_checkerboard() -> None:
         for c in range(9)
         if (r // 3 + c // 3) % 2
     ]
-    tumour = shapely.union_all(cells)
-    # Every tumour core, nothing else, plus the vectoriser's joint at each of the four
-    # corners where 8-connected blocks touch: a diamond of half a core.
-    assert region.geometry.contains(tumour.buffer(-1))
-    assert tumour.difference(region.geometry).area == pytest.approx(0, abs=1)
-    # rel: vertices are rounded to 0.1 level-0 px.
-    assert region.geometry.difference(tumour).area == pytest.approx(4 * 0.5 * scale**2, rel=1e-3)
-    area = (36 + 4 * 0.5) * scale**2 * SLIDE_MPP**2
-    assert region.measurements["area_um2"] == pytest.approx(area, rel=1e-3)
+    assert shapely.equals(region.geometry, shapely.union_all(cells))  # exactly the cores
+    assert region.measurements["area_um2"] == pytest.approx(36 * scale**2 * SLIDE_MPP**2)
     assert 0.8 < region.measurements["mean_probability"] < 0.9
+    four = run(checkerboard, thresholds={"tumour": 0.5}, simplify_px=0, smooth=0, connectivity=4)
+    assert len(four[1].features) == 4
 
 
 def test_default_regions_are_smoothed() -> None:
-    _, result = run(checkerboard, thresholds={"tumour": 0.5})
-    (region,) = result.features
-    assert len(region.geometry.exterior.coords) > 40  # corners rounded, not 4 per block
+    _, result = run(checkerboard, thresholds={"tumour": 0.5}, connectivity=4)
+    core, origin = STRIDE * DOWNSAMPLE, OVERLAP // 2 * DOWNSAMPLE
+    blocks = [
+        shapely.box(*(origin + 3 * core * v for v in (c, r, c + 1, r + 1)))
+        for r in range(3)
+        for c in range(3)
+        if (r + c) % 2
+    ]
+    assert len(result.features) == len(blocks)
+    for region in result.features:
+        assert len(region.geometry.exterior.coords) > 5  # corners rounded
+        # Smoothing works at the scale of one grid pixel (a core here): each region stays
+        # inside its exact 3 x 3-core block and covers all of it but the outer core.
+        (block,) = [b for b in blocks if b.contains(region.geometry.centroid)]
+        assert block.buffer(1).contains(region.geometry)
+        assert region.geometry.contains(block.buffer(-core))
 
 
 def test_smoothing_spreads_but_keeps_probabilities_and_gaps() -> None:

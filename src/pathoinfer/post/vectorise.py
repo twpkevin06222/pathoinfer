@@ -3,19 +3,19 @@
 Every function works in mask pixels: pixel ``(col, row)`` covers ``[col, col+1] x
 [row, row+1]``. ``to_feature`` maps a region to level 0 at the end.
 
-1. ``regions``: one ``Piece`` per 8-connected region of a mask, with holes.
-   ``cv2.findContours(RETR_CCOMP, CHAIN_APPROX_SIMPLE)`` traces outer boundaries and holes
-   through pixel centres; each contour is widened by half a pixel one segment at a time
-   (GEOS mis-buffers a contour that runs back over itself), so polygons follow pixel
-   edges and their areas equal pixel counts, except where two parts of a region touch
-   only at a pixel corner: the contour runs diagonally through that corner, which adds a
-   diamond of half a pixel per contact. A region's holes are subtracted in one
-   difference (one at a time is quadratic in the hole count).
-2. ``merge``: union same-class pieces that touch (regions cut by band boundaries).
+1. ``regions``: one ``Piece`` per connected region of a mask, with holes: the exact union
+   of its pixels, so areas equal pixel counts and holes keep their corners. Each row's
+   runs of a region become rectangles (stacked over rows where a run repeats) and are
+   unioned. ``connectivity`` 8 (default) keeps parts that touch only at a pixel corner
+   in one region, as polygons meeting at that point; 4 makes them separate regions.
+2. ``merge``: union same-class pieces that touch (regions cut by band boundaries), by
+   the same connectivity.
 3. ``fill_holes``: fill holes under a size unless another class's region lies inside,
    dropping same-class islands in the filled holes.
 4. ``to_feature``: drop collinear vertices, simplify (Douglas-Peucker, topology kept),
-   smooth (``chaikin``), make valid, scale to level 0, round to 0.1 px, drop regions under
+   smooth (``chaikin`` on edges split to at most ``SMOOTH_SEGMENT_PX``, so each corner
+   loses about a pixel whatever the edge lengths, then simplify at
+   ``SMOOTH_TOLERANCE_PX`` to drop the near-collinear points), make valid, scale to level 0, round to 0.1 px, drop regions under
    ``min_area_um2``; measurements ``area_um2``, ``perimeter_um``, ``mean_probability``.
 
 ``vectorise`` runs all four on a whole mask.
@@ -23,15 +23,23 @@ Every function works in mask pixels: pixel ``(col, row)`` covers ``[col, col+1] 
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import numpy as np
 import shapely
 from numpy.typing import NDArray
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from pathoinfer.stitch.base import Feature
+
+Connectivity = Literal[4, 8]
+
+# Longest edge Chaikin smoothing sees, in mask pixels: each round cuts at most a quarter
+# of it (1 px) from a corner, whatever the polygon's edge lengths.
+SMOOTH_SEGMENT_PX = 4.0
+# Douglas-Peucker tolerance after smoothing, in mask pixels: far below what shows.
+SMOOTH_TOLERANCE_PX = 0.1
 
 
 @dataclass
@@ -62,7 +70,12 @@ def to_feature(
     # between near-tied points; drop them so it simplifies from the true corners.
     geometry = shapely.simplify(piece.geometry, 0)
     geometry = shapely.simplify(geometry, simplify_px, preserve_topology=True)
-    geometry = polygonal(shapely.make_valid(chaikin(geometry, smooth)))
+    if smooth:
+        # Chaikin cuts a quarter of each edge: split long edges so cuts stay pixel-sized.
+        geometry = chaikin(shapely.segmentize(geometry, SMOOTH_SEGMENT_PX), smooth)
+        # Drop the near-collinear points smoothing leaves along straight runs.
+        geometry = shapely.simplify(geometry, SMOOTH_TOLERANCE_PX, preserve_topology=True)
+    geometry = polygonal(shapely.make_valid(geometry))
     if geometry is None:
         return None
     offset = np.asarray(origin)
@@ -95,11 +108,13 @@ def vectorise(
     smooth: int = 2,
     min_area_um2: float = 0.0,
     fill_holes_um2: float = 0.0,
+    connectivity: Connectivity = 8,
 ) -> list[Feature]:
-    """One Feature per 8-connected region of a whole ``mask``; ``values`` (same shape)
+    """One Feature per connected region of a whole ``mask``; ``values`` (same shape)
     gives each region's ``mean_probability``. See ``to_feature`` for the transform."""
     px_um2 = (level0_per_px * slide_mpp) ** 2
-    pieces = fill_holes(regions(mask, values, class_id, 0), fill_holes_um2 / px_um2)
+    pieces = regions(mask, values, class_id, 0, connectivity)
+    pieces = fill_holes(pieces, fill_holes_um2 / px_um2)
     features = [
         to_feature(
             p,
@@ -118,71 +133,60 @@ def vectorise(
 
 
 def regions(
-    mask: NDArray[np.bool_], probs: NDArray[np.float32], class_id: int, top: int
+    mask: NDArray[np.bool_],
+    probs: NDArray[np.float32],
+    class_id: int,
+    top: int,
+    connectivity: Connectivity = 8,
 ) -> list[Piece]:
-    """One piece per 8-connected region of ``mask``, with holes, offset by ``top`` rows."""
+    """One piece per ``connectivity``-connected region of ``mask`` (4 or 8), with holes,
+    offset by ``top`` rows: the exact union of the region's pixels. With 8, parts that
+    touch only at a corner are one piece whose polygons meet at that point."""
     if not mask.any():
         return []
-    mask8 = mask.astype(np.uint8)
-    count, labelled = cv2.connectedComponents(mask8, connectivity=8)
-    components = np.asarray(labelled, dtype=np.int64)
-    sums = np.bincount(components.ravel(), weights=probs.ravel(), minlength=count)
-    sizes = np.bincount(components.ravel(), minlength=count)
-    contours, hierarchy = cv2.findContours(mask8, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-    links = hierarchy[0]
+    count, labelled = cv2.connectedComponents(mask.astype(np.uint8), connectivity=connectivity)
+    labels = np.asarray(labelled, dtype=np.int64)
+    sums = np.bincount(labels.ravel(), weights=probs.ravel(), minlength=count)
+    sizes = np.bincount(labels.ravel(), minlength=count)
+    label, x0, y0, x1, y1 = _runs(labels)
+    boxes = shapely.box(x0, y0 + top, x1, y1 + top)
+    bounds = np.flatnonzero(np.diff(label)) + 1
     pieces = []
-    for i, outer in enumerate(contours):
-        if links[i][3] != -1:
-            continue
-        holes = []
-        child = links[i][2]
-        while child != -1:
-            holes.append(_hole(contours[child], top))
-            child = links[child][0]
-        # One difference with all holes: one at a time is quadratic in the hole count.
-        geometry = _filled(outer, top)
-        if holes:
-            geometry = geometry.difference(shapely.union_all(holes))
-        x, y = outer[0, 0]
-        component = components[y, x]
+    for start, stop in zip(np.r_[0, bounds], np.r_[bounds, len(label)], strict=True):
+        geometry = boxes[start] if stop - start == 1 else shapely.union_all(boxes[start:stop])
+        component = label[start]
         pieces.append(Piece(geometry, class_id, float(sums[component]), int(sizes[component])))
     return pieces
 
 
-def _ring(contour: NDArray[Any], top: int) -> tuple[Any, Any]:
-    """The pixel centres of ``contour`` as (interior polygon, half-pixel-wide boundary)."""
-    points = contour[:, 0, :].astype(np.float64) + (0.5, top + 0.5)
-    if len(points) == 1:
-        edge = Point(points[0]).buffer(0.5, cap_style="square")
-    else:
-        # Buffered one segment at a time: a pixel-centre contour can run back over itself,
-        # and GEOS mis-buffers such a line as a whole, dropping parts of the boundary.
-        ring = np.vstack([points, points[:1]])
-        segments = shapely.linestrings(np.stack([ring[:-1], ring[1:]], axis=1))
-        edge = shapely.union_all(shapely.buffer(segments, 0.5, cap_style="square"))
-    interior = shapely.make_valid(Polygon(points)) if len(points) >= 3 else Polygon()
-    return interior, edge
+def _runs(labels: NDArray[np.int64]) -> tuple[NDArray[np.int64], ...]:
+    """Every labelled region as rectangles ``(label, x0, y0, x1, y1)``, sorted by label:
+    each row's runs of one label, stacked over rows where a run repeats unchanged."""
+    padded = np.pad(labels, ((0, 0), (1, 1)))
+    change = padded[:, 1:] != padded[:, :-1]  # column k: between pixels k - 1 and k
+    rows, x0 = np.nonzero(change & (padded[:, 1:] != 0))
+    _, x1 = np.nonzero(change & (padded[:, :-1] != 0))
+    label = padded[rows, x0 + 1]
+    order = np.lexsort((rows, x1, x0, label))
+    label, x0, x1, rows = label[order], x0[order], x1[order], rows[order]
+    same = (np.diff(label) == 0) & (np.diff(x0) == 0) & (np.diff(x1) == 0) & (np.diff(rows) == 1)
+    starts = np.r_[0, np.flatnonzero(~same) + 1]
+    ends = np.r_[starts[1:], len(label)] - 1
+    return label[starts], x0[starts], rows[starts], x1[starts], rows[ends] + 1
 
 
-def _filled(contour: NDArray[Any], top: int) -> Any:
-    """The pixels inside and on an outer boundary."""
-    interior, edge = _ring(contour, top)
-    return shapely.union(interior, edge)
-
-
-def _hole(contour: NDArray[Any], top: int) -> Any:
-    """The background pixels enclosed by a hole boundary (traced on the foreground)."""
-    interior, edge = _ring(contour, top)
-    return shapely.difference(interior, edge)
-
-
-def merge(pieces: list[Piece]) -> list[Piece]:
-    """Union every group of same-class pieces that touch across band boundaries."""
+def merge(pieces: list[Piece], connectivity: Connectivity = 8) -> list[Piece]:
+    """Union every group of same-class pieces that touch across band boundaries: along an
+    edge, or (``connectivity`` 8) also at a corner."""
     merged = []
     for class_id in sorted({p.class_id for p in pieces}):
         group = [p for p in pieces if p.class_id == class_id]
-        tree = shapely.STRtree([p.geometry for p in group])
-        left, right = tree.query([p.geometry for p in group], predicate="intersects")
+        geometries = np.array([p.geometry for p in group])
+        left, right = shapely.STRtree(geometries).query(geometries, predicate="intersects")
+        if connectivity == 4:  # join along a shared edge, not at a corner point
+            touching = shapely.intersection(geometries[left], geometries[right])
+            keep = (shapely.length(touching) > 0) | (left == right)
+            left, right = left[keep], right[keep]
         for indices in _connected(len(group), zip(left.tolist(), right.tolist(), strict=True)):
             members = [group[i] for i in indices]
             merged.append(

@@ -48,6 +48,7 @@ for feature in result.features:
 | `simplify_px` | `1.5` | Douglas-Peucker tolerance in output pixels (topology kept); turns pixel staircases into diagonal runs |
 | `smooth` | `2` | Rounds of Chaikin corner cutting after simplifying: each replaces every vertex with points 1/4 and 3/4 along its edges, doubling the vertices, so outlines are curves rather than pixel steps. `0` keeps outlines on pixel edges |
 | `min_area_um2` | `0.0` | Remove small objects: drop regions smaller than this, checked on the merged region (before simplifying, so specks cost nothing more) and again on the final polygon |
+| `connectivity` | `8` | 8: parts touching only at a pixel corner are one region (a MultiPolygon meeting at the point); 4: separate regions, so diagonal strands break up |
 | `fill_holes_um2` | `0.0` | Fill holes smaller than this. A hole that holds another class's region is kept, so classes never overlap; same-class islands inside a filled hole are dropped. `.inf` in YAML fills every hole |
 | `band_height` | `2 * tile` | Rows per band, in output pixels |
 | `keep_labels` | `False` | Also return the slide's label map as `rasters["labels"]` (-1 where no tile reached) |
@@ -64,9 +65,9 @@ How it works (the module docstring has the maths):
    few bands, not the slide, whatever order the DataLoader workers deliver tiles in.
    Peak canvas memory is logged (`peak_bytes`).
 3. **Polygonise each band.** Argmax gives a label map. For every class except the card's
-   `background_id`, `cv2.findContours(RETR_CCOMP, CHAIN_APPROX_SIMPLE)` traces each
-   8-connected region and its holes through pixel centres; each contour segment is
-   widened by half a pixel, so polygons follow pixel edges and areas match pixel counts.
+   `background_id`, each connected region (`connectivity`, default 8) becomes the exact
+   union of its pixels, holes included (`post.vectorise.regions`), so areas equal pixel
+   counts.
 4. **Merge seams.** Polygons that reach a band boundary are kept aside and, once every
    band is done, unioned with the same-class polygons they touch (STRtree query, then
    `unary_union` of each touching group).
@@ -144,8 +145,9 @@ Engine runs for classification are not wired yet: the writers take objects from 
 Segmentation and heatmap regions both use `post/vectorise.py`: `regions` (contours with
 holes on pixel edges), `merge` (across band seams), `fill_holes`, `to_feature`
 (simplify, smooth, scale to level 0, measure) and `vectorise` (all of them on one whole
-mask). Regions are 8-connected: parts that touch only at a pixel corner are one region,
-joined by a diamond of half a pixel.
+mask). Regions are exact pixel unions; with `connectivity` 8 (default) parts that touch
+only at a pixel corner are one region, with 4 separate regions. `post/README.md` has
+the details and measurements.
 
 ## Testing
 
@@ -153,7 +155,7 @@ joined by a diamond of half a pixel.
 equals a brute-force average that intersects every core with every tile (also with
 missing tiles); one hot tile spreads exactly `stride²`, `stride * overlap/2` and
 `(overlap/2)²` over `(stride + overlap)²`; the thresholded region is exactly the tumour
-cores plus the corner joints; smoothing keeps probabilities summing to 1 and gaps empty.
+cores (one region with connectivity 8, four with 4); smoothing keeps probabilities summing to 1 and gaps empty.
 
 `tests/stitch/test_detection.py` uses an ideal detector that reports every object a tile
 overlaps, clipped at the tile edge: objects on four-tile corners and edges are reported

@@ -21,9 +21,9 @@ Outputs (``finalize``):
   as QuPath detections with a ``prob_<class>`` measurement each, for measurement maps.
 - ``features``: for each class in ``thresholds``, region polygons where its probability
   is at least the threshold, traced on the core grid by ``post.vectorise`` (QuPath
-  annotations). ``mean_probability`` is the class's mean over the region's cores. Cores
-  touching only at a corner join one region, with a diamond of half a core at the joint
-  (the vectoriser's 8-connectivity).
+  annotations). ``mean_probability`` is the class's mean over the region's cores. With
+  ``connectivity`` 8 (default) cores touching only at a corner are one region; with 4,
+  separate regions.
 """
 
 import math
@@ -35,7 +35,7 @@ import torch
 from loguru import logger
 from numpy.typing import NDArray
 
-from pathoinfer.post.vectorise import vectorise
+from pathoinfer.post.vectorise import Connectivity, vectorise
 from pathoinfer.registry.model_card import ClassificationCard
 from pathoinfer.runtime.base import Outputs
 from pathoinfer.stitch.base import Feature, Raster, StitchResult
@@ -55,6 +55,7 @@ class HeatmapStitcher:
         smooth: int = 2,
         min_area_um2: float = 0.0,
         fill_holes_um2: float = 0.0,
+        connectivity: Connectivity = 8,
     ) -> None:
         """``thresholds`` maps class names to the probability their regions start at.
         Region options are as in ``post.vectorise``, in core-grid pixels."""
@@ -76,6 +77,7 @@ class HeatmapStitcher:
             "smooth": smooth,
             "min_area_um2": min_area_um2,
             "fill_holes_um2": fill_holes_um2,
+            "connectivity": connectivity,
         }
         n = card.output.n_classes
         self._probs = np.zeros((grid.n_rows, grid.n_cols, n), np.float32)

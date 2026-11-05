@@ -16,6 +16,15 @@ config or output formats; the entry says so.
 
 ### Changed
 
+- Polygons are now the exact union of each region's pixels: areas equal pixel counts
+  and holes keep their corners (before, outlines came out 1-4% too large and every hole
+  lost a quarter pixel per corner). About 5x faster on noisy masks. **Segmentation
+  outputs change.**
+- New `segmentation.connectivity` (8, default, or 4): whether parts touching only at a
+  pixel corner are one region. 8 matches the old grouping without its half-pixel joint.
+- Smoothing cuts about a pixel per corner whatever the edge lengths (edges are split to
+  at most 4 px first); long straight edges no longer lose large corners. Smoothed
+  polygons have fewer vertices.
 - The mask-to-polygon code moved from `stitch/segmentation.py` to `post/vectorise.py`
   and is shared by segmentation and heatmaps; segmentation output is unchanged.
 

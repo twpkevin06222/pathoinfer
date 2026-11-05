@@ -61,13 +61,16 @@ class SegmentationOptions(_Strict):
     2.0 mpp, or at the model's mpp when that is coarser. ``smooth`` rounds of Chaikin
     corner cutting round off pixel steps (each doubles the vertices); 0 keeps outlines
     on pixel edges. Holes under ``fill_holes_um2`` are filled (unless another class lies
-    inside) and regions under ``min_area_um2`` dropped; ``.inf`` fills every hole."""
+    inside) and regions under ``min_area_um2`` dropped; ``.inf`` fills every hole.
+    ``connectivity`` 8 keeps parts touching only at a pixel corner in one region (a
+    MultiPolygon meeting at that point); 4 makes them separate regions."""
 
     output_mpp: float | None = Field(None, gt=0)
     simplify_px: float = Field(1.5, ge=0)
     smooth: int = Field(2, ge=0, le=5)
     min_area_um2: float = Field(0.0, ge=0)
     fill_holes_um2: float = Field(0.0, ge=0)
+    connectivity: Literal[4, 8] = 8
 
 
 class DetectionOptions(_Strict):

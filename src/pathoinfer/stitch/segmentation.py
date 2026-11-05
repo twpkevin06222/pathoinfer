@@ -17,9 +17,8 @@ arrived, whatever the arrival order, so memory is a few bands, not the slide. Pe
 canvas memory is logged.
 
 Polygons. A finalised band is argmaxed to a label map. Each class but the background
-becomes one polygon per 8-connected region: ``cv2.findContours(RETR_CCOMP,
-CHAIN_APPROX_SIMPLE)`` traces outer boundaries and holes through pixel centres, and each
-ring is widened by half a pixel (mitred) so polygons follow pixel edges. Polygons that
+becomes one polygon per connected region (``connectivity`` 8 or 4), traced exactly on
+pixel edges by ``post.vectorise.regions``. Polygons that
 reach a band boundary are merged with the polygons they touch in the neighbouring band
 (STRtree + unary_union) once every band is done.
 
@@ -47,7 +46,14 @@ import torch.nn.functional as F
 from loguru import logger
 from numpy.typing import NDArray
 
-from pathoinfer.post.vectorise import Piece, fill_holes, merge, regions, to_feature
+from pathoinfer.post.vectorise import (
+    Connectivity,
+    Piece,
+    fill_holes,
+    merge,
+    regions,
+    to_feature,
+)
 from pathoinfer.registry.model_card import SegmentationCard
 from pathoinfer.runtime.base import Outputs
 from pathoinfer.stitch.base import Raster, StitchResult
@@ -82,6 +88,7 @@ class SegmentationStitcher:
         smooth: int = 2,
         min_area_um2: float = 0.0,
         fill_holes_um2: float = 0.0,
+        connectivity: Connectivity = 8,
         band_height: int | None = None,
         keep_labels: bool = False,
     ) -> None:
@@ -89,7 +96,7 @@ class SegmentationStitcher:
             raise ValueError(f"output_mpp {output_mpp} is finer than the model's {grid.mpp}")
         self.card, self.grid = card, grid
         self.simplify_px, self.min_area_um2 = simplify_px, min_area_um2
-        self.smooth = smooth
+        self.smooth, self.connectivity = smooth, connectivity
         px_um2 = output_mpp**2
         self.fill_holes_px, self.min_area_px = fill_holes_um2 / px_um2, min_area_um2 / px_um2
         self.scale = output_mpp / grid.mpp
@@ -128,7 +135,8 @@ class SegmentationStitcher:
             )
             for band in sorted(self._bands):
                 self._finish_band(band)
-        pieces = fill_holes(self._done + merge(self._seams), self.fill_holes_px)
+        pieces = self._done + merge(self._seams, self.connectivity)
+        pieces = fill_holes(pieces, self.fill_holes_px)
         pieces = [p for p in pieces if p.geometry.area >= self.min_area_px]
         names = {c.id: c.name for c in self.card.classes}
         features = [
@@ -208,7 +216,7 @@ class SegmentationStitcher:
             self._labels[top : top + rows] = labels
         bounds = shapely.box(0, top, self.width, top + rows)
         for c in self.classes:
-            for piece in regions(labels == c, probs[c], c, top):
+            for piece in regions(labels == c, probs[c], c, top, self.connectivity):
                 piece.geometry = piece.geometry.intersection(bounds)
                 if piece.geometry.is_empty:
                     continue
