@@ -1,0 +1,61 @@
+# Clean-venv check: only patchology and pathoinfer (never pathotrain), CPU torch, then
+# lint, type-check, CPU tests (GPU tests skip without nvidia-smi) and a wheel build.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The patchology commit pathoinfer is tested against; bump it with patchology changes.
+  PATCHOLOGY_REF: 8afcb74ecdb521561d4353b8abc102b0db8dd6a5
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install (clean venv, CPU torch)
+        run: |
+          uv venv .venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install "patchology @ git+https://github.com/twpkevin06222/patchology@${PATCHOLOGY_REF}"
+          # --no-sources: ignore the workspace's CUDA torch index; the CPU torch above stays.
+          uv pip install --no-sources -e ".[onnx]" --group dev
+          uv pip list | grep -Ei "^(torch|patchology|pathoinfer|onnxruntime|polars|duckdb) "
+
+      - name: No pathotrain in the environment
+        run: "! .venv/bin/python -c 'import pathotrain'"
+
+      - name: Lint
+        run: |
+          .venv/bin/ruff check
+          .venv/bin/ruff format --check
+
+      - name: Type-check
+        run: .venv/bin/mypy src
+
+      - name: Tests (CPU)
+        run: .venv/bin/python -m pytest -q -rs
+
+      - name: Build wheel
+        run: |
+          uv build --wheel
+          .venv/bin/python -m zipfile -l dist/*.whl | grep -q "pathoinfer/registry/schema/model_card.v1.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
