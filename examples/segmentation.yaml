@@ -32,6 +32,8 @@ segmentation:
   min_area_um2: 50                # remove small objects: drop regions smaller than this
   fill_holes_um2: 200             # fill holes smaller than this (.inf: all); holes holding
                                   # another class are kept
+  connectivity: 8                 # 8: parts touching at a pixel corner are one region;
+                                  # 4: separate regions
 
 outputs:
   dir: outputs/segmentation

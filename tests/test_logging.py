@@ -1,11 +1,13 @@
 """Log levels run in fresh interpreters: levels are process-wide, set on import."""
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # Log from inside each package's namespace (loguru names records by the calling module).
 EMIT = """
@@ -27,7 +29,8 @@ def run(code: str, env: dict[str, str] | None = None, args: list[str] | None = N
         text=True,
         check=False,
     )
-    return proc.stderr
+    # loguru colours its output where it detects colour support (e.g. GitHub Actions).
+    return ANSI.sub("", proc.stderr)
 
 
 def shown(err: str, tag: str, package: str) -> list[str]:
