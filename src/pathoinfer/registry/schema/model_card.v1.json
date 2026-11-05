@@ -286,7 +286,7 @@
     },
     "DetectionOutput": {
       "additionalProperties": false,
-      "description": "Three tensors, one row per detection: boxes ``(batch, n, 4)``, scores ``(batch, n)``\nand labels ``(batch, n)`` holding class ids.",
+      "description": "Three tensors, one row per detection: boxes ``(batch, n, 4)``, scores ``(batch, n)``\nand labels ``(batch, n)`` holding class ids; optionally ``class_probs``\n``(batch, n, n_classes)``, each detection's probability per class.",
       "properties": {
         "boxes": {
           "default": "boxes",
@@ -324,6 +324,18 @@
           "minimum": 0,
           "title": "Score Threshold",
           "type": "number"
+        },
+        "class_probs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Class Probs"
         }
       },
       "required": [

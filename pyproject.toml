@@ -96,6 +96,11 @@ known-first-party = ["patchology", "pathoinfer"]
 strict = true
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+# shapely 2 ships no type information; types-shapely would add it (not a dependency yet).
+module = ["shapely", "shapely.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["gpu: needs a CUDA GPU; skipped when none is available"]

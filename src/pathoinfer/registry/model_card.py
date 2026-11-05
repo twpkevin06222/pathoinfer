@@ -74,7 +74,8 @@ class SegmentationOutput(_Strict):
 
 class DetectionOutput(_Strict):
     """Three tensors, one row per detection: boxes ``(batch, n, 4)``, scores ``(batch, n)``
-    and labels ``(batch, n)`` holding class ids."""
+    and labels ``(batch, n)`` holding class ids; optionally ``class_probs``
+    ``(batch, n, n_classes)``, each detection's probability per class."""
 
     boxes: str = "boxes"
     scores: str = "scores"
@@ -82,9 +83,11 @@ class DetectionOutput(_Strict):
     box_format: Literal["xyxy", "cxcywh"]
     box_units: Literal["pixel", "normalised"]
     score_threshold: float = Field(ge=0, le=1)
+    class_probs: str | None = None
 
     def tensor_names(self) -> tuple[str, ...]:
-        return (self.boxes, self.scores, self.labels)
+        names = (self.boxes, self.scores, self.labels)
+        return names if self.class_probs is None else (*names, self.class_probs)
 
 
 class ClassificationOutput(_Strict):

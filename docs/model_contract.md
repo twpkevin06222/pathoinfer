@@ -76,6 +76,7 @@ task.
 | `output.box_format` | `xyxy` \| `cxcywh` | Box encoding |
 | `output.box_units` | `pixel` \| `normalised` | Tile pixels, or fractions of `tile_size` |
 | `output.score_threshold` | float in `[0, 1]` | Default threshold; a run config may override it |
+| `output.class_probs` | str or null, default null | Optional `(batch, n, n_classes)` output: each detection's probability per class |
 
 Every label is a foreground class, so a detection card has no `background_id`.
 
