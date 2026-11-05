@@ -19,5 +19,11 @@ runtime:
   tensorrt: true                  # ONNX models use the TensorRT EP when it loads
   autocast: null                  # PyTorch models only: bf16 or fp16
 
+# How detections are stitched across tiles.
+detection:
+  score_threshold: null           # null: the model card's score_threshold
+  nms_iou: null                   # e.g. 0.5: NMS between tiles for objects near tile cores
+  geometry: box                   # box (Polygon) or point (centre)
+
 # Default: tab20 colours in class order. Replace any by class name.
 class_colors: {}                  # e.g. {tumor: [255, 0, 0]}

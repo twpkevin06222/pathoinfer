@@ -42,6 +42,15 @@ class RuntimeConfig(_Strict):
     autocast: Literal["bf16", "fp16"] | None = None
 
 
+class DetectionOptions(_Strict):
+    """Detection stitching. ``score_threshold`` None uses the card's. ``nms_iou`` None
+    turns cross-tile NMS off. ``geometry`` is what writers output per detection."""
+
+    score_threshold: float | None = Field(None, ge=0, le=1)
+    nms_iou: float | None = Field(None, gt=0, le=1)
+    geometry: Literal["point", "box"] = "box"
+
+
 class InferenceConfig(_Strict):
     """One task's settings. ``model`` is an ``.onnx`` path or ``models:/NAME/<version>``.
     ``class_colors`` replaces the default colour of any class, by class name."""
@@ -50,6 +59,7 @@ class InferenceConfig(_Strict):
     model: str
     patchology: PatchologyInput = PatchologyInput()
     runtime: RuntimeConfig = RuntimeConfig()
+    detection: DetectionOptions = DetectionOptions()
     class_colors: dict[str, tuple[Byte, Byte, Byte]] = {}
 
 
