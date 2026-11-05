@@ -11,7 +11,10 @@ requires-python = ">=3.12"
 dependencies = [
     "duckdb>=2.0.0",
     "matplotlib>=3.11.2",
-    "patchology",
+    "numpy>=2.5.4",
+    "opencv-python-headless>=5.0.0.93",
+    # Tiling and coordinate changes in patchology are breaking changes for pathoinfer.
+    "patchology>=0.1.0,<0.2",
     "polars>=2.1.0",
     "pyarrow>=25.0.1",
     "pydantic>=2.14.1",
@@ -21,13 +24,21 @@ dependencies = [
     "tqdm>=4.70.1",
 ]
 
+[project.scripts]
+pathoinfer = "pathoinfer.cli:main"
+
 [project.optional-dependencies]
-onnx = [
-    "onnxruntime-gpu>=1.31.1",
-]
-mlflow = [
-    "mlflow>=3.17.2",
-]
+onnx = ["onnxruntime-gpu>=1.31.1"]
+trt = ["tensorrt"]
+triton = ["tritonclient[grpc]"]
+vllm-client = ["httpx"]
+serve = ["fastapi", "uvicorn"]
+convert = ["nvidia-modelopt", "llmcompressor"]
+mlflow = ["mlflow-skinny"]
+hf = ["huggingface-hub"]
+# Only for io/geodataframe.py's to_geodataframe(); never used by core or tests.
+geopandas = ["geopandas"]
+all = ["pathoinfer[onnx,trt,triton,vllm-client,serve,convert,mlflow,hf,geopandas]"]
 
 [build-system]
 requires = ["hatchling"]
@@ -56,6 +67,10 @@ extend-select = ["B", "I", "LOG", "T20", "TID", "UP"]
 "rasterio".msg = "No rasterio: vectorise with OpenCV and shapely."
 "osgeo".msg = "No GDAL: vectorise with OpenCV and shapely."
 "openslide".msg = "Read slides through patchology (patchology.open_slide), never openslide directly."
+"vllm".msg = "Never import vllm: talk to a vLLM server over HTTP (runtime/remote/vllm.py)."
+
+[tool.ruff.lint.per-file-ignores]
+"src/pathoinfer/io/geodataframe.py" = ["TID251"]  # the one geopandas interop helper
 
 [tool.mypy]
 strict = true
@@ -63,3 +78,4 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["gpu: needs a CUDA GPU; skipped when none is available"]

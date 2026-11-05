@@ -1,1 +1,1 @@
-"""Stitchers: tile outputs back to slide level, per task."""
+"""Stitchers: tile outputs back to slide level, one per task."""

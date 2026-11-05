@@ -1,0 +1,43 @@
+# Agent instructions, kept local.
+CLAUDE.md
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+.venv-*/
+.env
+
+# Tool caches and reports
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Model artifacts: models live in model folders outside the repo.
+*.onnx
+*.onnx.data
+*.plan
+*.pt
+*.pt2
+*.safetensors
+
+# Slides and slide-sized outputs: tests generate synthetic slides, real ones never go in.
+*.svs
+*.ndpi
+*.mrxs
+*.scn
+*.bif
+*.czi
+*.isyntax
+*.vms
+*.vmu
+*.tif
+*.tiff

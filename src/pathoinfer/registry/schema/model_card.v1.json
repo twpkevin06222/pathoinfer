@@ -1,0 +1,267 @@
+{
+  "$defs": {
+    "ClassInfo": {
+      "additionalProperties": false,
+      "description": "One class: its output index (channel or label), name and optional display colour.",
+      "properties": {
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        }
+      },
+      "required": [
+        "index",
+        "name"
+      ],
+      "title": "ClassInfo",
+      "type": "object"
+    },
+    "OutputSpec": {
+      "additionalProperties": false,
+      "description": "One model output. ``shape`` uses names for dynamic axes, e.g. ``[\"batch\", 300, 4]``.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "shape": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Shape",
+          "type": "array"
+        },
+        "dtype": {
+          "enum": [
+            "float32",
+            "float16",
+            "int64",
+            "int32"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "logits",
+            "probabilities",
+            "boxes_xyxy",
+            "scores",
+            "labels"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "shape",
+        "dtype",
+        "kind"
+      ],
+      "title": "OutputSpec",
+      "type": "object"
+    },
+    "Preprocessing": {
+      "additionalProperties": false,
+      "description": "Tiles are RGB uint8, read at ``tile_mpp`` (ICC to sRGB when ``icc``), then fed as\nfloat32 NCHW: ``x / 255``, then ``(x - mean) / std`` per channel.",
+      "properties": {
+        "mean": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Mean",
+          "type": "array"
+        },
+        "std": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Std",
+          "type": "array"
+        },
+        "icc": {
+          "default": true,
+          "title": "Icc",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mean",
+        "std"
+      ],
+      "title": "Preprocessing",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A model folder's ``model_card.json``; ``file`` is relative to that folder.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "task": {
+      "enum": [
+        "segmentation",
+        "detection",
+        "heatmap"
+      ],
+      "title": "Task",
+      "type": "string"
+    },
+    "architecture": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Architecture"
+    },
+    "format": {
+      "enum": [
+        "onnx",
+        "torchscript",
+        "torch_export",
+        "tensorrt_plan"
+      ],
+      "title": "Format",
+      "type": "string"
+    },
+    "file": {
+      "title": "File",
+      "type": "string"
+    },
+    "input_name": {
+      "default": "image",
+      "title": "Input Name",
+      "type": "string"
+    },
+    "tile_size": {
+      "exclusiveMinimum": 0,
+      "title": "Tile Size",
+      "type": "integer"
+    },
+    "tile_mpp": {
+      "exclusiveMinimum": 0,
+      "title": "Tile Mpp",
+      "type": "number"
+    },
+    "preprocessing": {
+      "$ref": "#/$defs/Preprocessing"
+    },
+    "classes": {
+      "items": {
+        "$ref": "#/$defs/ClassInfo"
+      },
+      "minItems": 1,
+      "title": "Classes",
+      "type": "array"
+    },
+    "outputs": {
+      "items": {
+        "$ref": "#/$defs/OutputSpec"
+      },
+      "minItems": 1,
+      "title": "Outputs",
+      "type": "array"
+    },
+    "provenance": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Provenance",
+      "type": "object"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "task",
+    "format",
+    "file",
+    "tile_size",
+    "tile_mpp",
+    "preprocessing",
+    "classes",
+    "outputs"
+  ],
+  "title": "ModelCard",
+  "type": "object"
+}

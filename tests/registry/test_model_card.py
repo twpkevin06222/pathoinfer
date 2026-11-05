@@ -1,6 +1,6 @@
 import pytest
 
-from pathoinfer.registry.card import class_colors
+from pathoinfer.registry.model_card import class_colors
 
 
 def test_default_colours_cycle_the_colormap() -> None:

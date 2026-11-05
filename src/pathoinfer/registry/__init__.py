@@ -1,1 +1,1 @@
-"""Model loading (local path, MLflow) and the model card."""
+"""Model cards and model loading."""

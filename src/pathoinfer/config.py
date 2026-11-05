@@ -1,15 +1,12 @@
 """Inference settings, one YAML file per task (examples in ``configs/``)."""
 
 from pathlib import Path
-from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from patchology import ArtifactConfig, Backend, TissueConfig
-
-Task = Literal["segmentation", "detection", "heatmap"]
-Byte = Annotated[int, Field(ge=0, le=255)]
+from pathoinfer.registry.model_card import Byte, Task
 
 
 class _Strict(BaseModel):

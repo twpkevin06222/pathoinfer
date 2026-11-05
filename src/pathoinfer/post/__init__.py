@@ -1,1 +1,1 @@
-"""Post-processing: vectorisation, NMS and smoothing."""
+"""Post-processing of stitched outputs: vectorisation, NMS, smoothing."""
