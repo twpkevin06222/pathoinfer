@@ -1,0 +1,16 @@
+# segmentation inference settings; load with pathoinfer.config.load_config.
+task: segmentation
+model: models/segmentation.onnx   # example; an .onnx file or models:/NAME/<version>
+
+# Passed to patchology. Tile size and mpp come from the model; slides that do not
+# report their resolution are refused.
+patchology:
+  backend: openslide              # or fastslide
+  icc: true                       # ICC profile -> sRGB; pathotrain trains with it on
+  tile_overlap: 0.25              # neighbours overlap so each tile's core avoids its edges
+  tissue_overlap: 0.1             # keep tiles with at least this fraction of tissue
+  tissue: {method: triangle}      # patchology TissueConfig fields
+  artifacts: {pen: true, blur: false}  # patchology ArtifactConfig fields
+
+# Default: tab20 colours in class order. Replace any by class name.
+class_colors: {}                  # e.g. {tumor: [255, 0, 0]}

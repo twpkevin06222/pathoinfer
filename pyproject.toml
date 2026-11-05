@@ -1,0 +1,65 @@
+[project]
+name = "pathoinfer"
+version = "0.1.0"
+description = "Whole slide image inference for pathotrain models, built on patchology."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    { name = "twpkevin06222", email = "tengwaipokevin@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=2.0.0",
+    "matplotlib>=3.11.2",
+    "patchology",
+    "polars>=2.1.0",
+    "pyarrow>=25.0.1",
+    "pydantic>=2.14.1",
+    "pyyaml>=6.0.3",
+    "shapely>=2",
+    "tifffile>=2026.10.15",
+    "tqdm>=4.70.1",
+]
+
+[project.optional-dependencies]
+onnx = [
+    "onnxruntime-gpu>=1.31.1",
+]
+mlflow = [
+    "mlflow>=3.17.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pre-commit>=4.7.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+    "types-pyyaml>=6.0.12.20261103",
+]
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.ruff.lint]
+extend-select = ["B", "I", "LOG", "T20", "TID", "UP"]
+
+# The hard rules in CLAUDE.md that a linter can enforce.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pandas".msg = "No pandas: tables are Polars, queries are DuckDB."
+"geopandas".msg = "No geopandas: geometry is shapely, tables are Polars."
+"pathotrain".msg = "pathoinfer never imports pathotrain; the contract is the exported model metadata."
+"rasterio".msg = "No rasterio: vectorise with OpenCV and shapely."
+"osgeo".msg = "No GDAL: vectorise with OpenCV and shapely."
+"openslide".msg = "Read slides through patchology (patchology.open_slide), never openslide directly."
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
