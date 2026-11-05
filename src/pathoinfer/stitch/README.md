@@ -114,13 +114,46 @@ columns `boxes` (level-0 `xyxy`), `scores`, `labels` and, when the card names a
 (`io.objects.ObjectTable.from_result`), so no Python object exists per detection.
 Output formats are in `docs/outputs.md`.
 
-## Other tasks
+## Classification heatmaps
 
-| Module | Status |
-|---|---|
-| `heatmap.py` | Stub until pathotrain exports a tile classifier. |
+`HeatmapStitcher(card, grid, sigma_tiles=0, thresholds=None, ...)` for a
+`ClassificationCard` (one `(batch, n_classes)` output per tile):
+
+1. **Average into cores.** A core's probabilities are the mean of every kept tile that
+   overlaps it, weighted by overlap area: its own tile counts `stride²`, each side
+   neighbour `stride * overlap/2`, each corner neighbour `(overlap/2)²`. Cores of tiles
+   that were not kept have no value (NaN).
+2. **Smooth (optional).** `sigma_tiles` > 0 applies a Gaussian over the core grid,
+   normalised so cores without a value neither count nor change.
+3. **Outputs.**
+   - `rasters["prob_<class>"]`: float16, one pixel per core, with `scale` the grid stride
+     and `origin` half the overlap in level-0 px (exact for interior cores; edge cores
+     reach the slide edge, half an overlap further than their pixel).
+   - `detections`: one object per kept core (its box), `labels` the argmax class,
+     `scores` its probability, `class_probs` every class's probability; writers emit them
+     as QuPath detections with `prob_<class>` measurements, for measurement maps.
+   - `features`: with `thresholds={"tumour": 0.5}`, region polygons where the class's
+     probability reaches the threshold, traced on the core grid by `post.vectorise`
+     (`simplify_px` default 1 core, `smooth` 2, `min_area_um2`, `fill_holes_um2`).
+
+Engine runs for classification are not wired yet: the writers take objects from either
+`detections` or `features`, and write one `objectType` per run.
+
+## Shared vectoriser
+
+Segmentation and heatmap regions both use `post/vectorise.py`: `regions` (contours with
+holes on pixel edges), `merge` (across band seams), `fill_holes`, `to_feature`
+(simplify, smooth, scale to level 0, measure) and `vectorise` (all of them on one whole
+mask). Regions are 8-connected: parts that touch only at a pixel corner are one region,
+joined by a diamond of half a pixel.
 
 ## Testing
+
+`tests/stitch/test_heatmap.py` feeds a checkerboard of 3 x 3-tile blocks: the raster
+equals a brute-force average that intersects every core with every tile (also with
+missing tiles); one hot tile spreads exactly `stride²`, `stride * overlap/2` and
+`(overlap/2)²` over `(stride + overlap)²`; the thresholded region is exactly the tumour
+cores plus the corner joints; smoothing keeps probabilities summing to 1 and gaps empty.
 
 `tests/stitch/test_detection.py` uses an ideal detector that reports every object a tile
 overlaps, clipped at the tile edge: objects on four-tile corners and edges are reported

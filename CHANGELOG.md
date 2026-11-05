@@ -5,6 +5,20 @@ All notable changes to pathoinfer. The format follows
 [Semantic Versioning](https://semver.org/). Before 1.0, a minor release may break the
 config or output formats; the entry says so.
 
+## [Unreleased]
+
+### Added
+
+- `stitch.heatmap.HeatmapStitcher`: tile classification to one probability vector per
+  tile core (overlap-area weighted), per-class float16 rasters, one QuPath detection per
+  core with `prob_<class>` measurements, optional thresholded region polygons and
+  optional Gaussian smoothing. Not yet wired into `pathoinfer run`.
+
+### Changed
+
+- The mask-to-polygon code moved from `stitch/segmentation.py` to `post/vectorise.py`
+  and is shared by segmentation and heatmaps; segmentation output is unchanged.
+
 ## [0.1.0] - 2026-11-06
 
 First release: segmentation and detection inference on whole slide images, from a model

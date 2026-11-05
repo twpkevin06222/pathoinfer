@@ -38,22 +38,19 @@ and round to 0.1 px. Measurements: ``area_um2``, ``perimeter_um`` and ``mean_pro
 """
 
 import math
-from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
 
-import cv2
 import numpy as np
 import shapely
 import torch
 import torch.nn.functional as F
 from loguru import logger
 from numpy.typing import NDArray
-from shapely.geometry import MultiPolygon, Point, Polygon
 
+from pathoinfer.post.vectorise import Piece, fill_holes, merge, regions, to_feature
 from pathoinfer.registry.model_card import SegmentationCard
 from pathoinfer.runtime.base import Outputs
-from pathoinfer.stitch.base import Feature, Raster, StitchResult
+from pathoinfer.stitch.base import Raster, StitchResult
 from pathoinfer.tiling.grid import SlideGrid, TileSpec
 
 
@@ -72,16 +69,6 @@ def gaussian_window(size: int) -> NDArray[np.float32]:
 class _Band:
     probs: NDArray[np.float32]
     weight: NDArray[np.float32]
-
-
-@dataclass
-class _Piece:
-    """One class region of one band, in output pixels."""
-
-    geometry: Any
-    class_id: int
-    prob_sum: float
-    pixels: int
 
 
 class SegmentationStitcher:
@@ -119,8 +106,8 @@ class SegmentationStitcher:
             for band in self._bands_of(spec):
                 self._pending[band] += 1
         self._bands: dict[int, _Band] = {}
-        self._done: list[_Piece] = []
-        self._seams: list[_Piece] = []
+        self._done: list[Piece] = []
+        self._seams: list[Piece] = []
         self._labels = np.full((self.height, self.width), -1, np.int16) if keep_labels else None
         self._bytes = self.peak_bytes = 0
 
@@ -141,9 +128,25 @@ class SegmentationStitcher:
             )
             for band in sorted(self._bands):
                 self._finish_band(band)
-        pieces = _fill_holes(self._done + _merge(self._seams), self.fill_holes_px)
+        pieces = fill_holes(self._done + merge(self._seams), self.fill_holes_px)
         pieces = [p for p in pieces if p.geometry.area >= self.min_area_px]
-        features = [f for p in pieces if (f := self._feature(p)) is not None]
+        names = {c.id: c.name for c in self.card.classes}
+        features = [
+            f
+            for p in pieces
+            if (
+                f := to_feature(
+                    p,
+                    names[p.class_id],
+                    level0_per_px=self.level0_per_px,
+                    slide_mpp=self.grid.slide_mpp,
+                    simplify_px=self.simplify_px,
+                    smooth=self.smooth,
+                    min_area_um2=self.min_area_um2,
+                )
+            )
+            is not None
+        ]
         logger.info(
             "segmentation: {} polygons; peak canvas {:.1f} MiB (bands of {} x {} px at {:.3g} mpp)",
             len(features),
@@ -205,7 +208,7 @@ class SegmentationStitcher:
             self._labels[top : top + rows] = labels
         bounds = shapely.box(0, top, self.width, top + rows)
         for c in self.classes:
-            for piece in _regions(labels == c, probs[c], c, top):
+            for piece in regions(labels == c, probs[c], c, top):
                 piece.geometry = piece.geometry.intersection(bounds)
                 if piece.geometry.is_empty:
                     continue
@@ -213,190 +216,3 @@ class SegmentationStitcher:
                 at_top = top > 0 and miny <= top
                 at_bottom = top + rows < self.height and maxy >= top + rows
                 (self._seams if at_top or at_bottom else self._done).append(piece)
-
-    def _feature(self, piece: _Piece) -> Feature | None:
-        # Collinear vertices left by the pixel-edge unions would make Douglas-Peucker pick
-        # between near-tied points; drop them so it simplifies from the true corners.
-        geometry = shapely.simplify(piece.geometry, 0)
-        geometry = shapely.simplify(geometry, self.simplify_px, preserve_topology=True)
-        geometry = _polygonal(shapely.make_valid(_chaikin(geometry, self.smooth)))
-        if geometry is None:
-            return None
-        mpp = self.grid.slide_mpp
-        geometry = shapely.transform(geometry, lambda xy: xy * self.level0_per_px)
-        geometry = _polygonal(shapely.set_precision(geometry, 0.1))
-        if geometry is None or geometry.area * mpp**2 < self.min_area_um2:
-            return None
-        name = next(c.name for c in self.card.classes if c.id == piece.class_id)
-        return Feature(
-            geometry=geometry,
-            class_id=piece.class_id,
-            class_name=name,
-            measurements={
-                "area_um2": float(geometry.area * mpp**2),
-                "perimeter_um": float(geometry.length * mpp),
-                "mean_probability": piece.prob_sum / piece.pixels,
-            },
-        )
-
-
-def _regions(
-    mask: NDArray[np.bool_], probs: NDArray[np.float32], class_id: int, top: int
-) -> list[_Piece]:
-    """One piece per 8-connected region of ``mask``, with holes, offset by ``top`` rows."""
-    if not mask.any():
-        return []
-    mask8 = mask.astype(np.uint8)
-    count, labelled = cv2.connectedComponents(mask8, connectivity=8)
-    components = np.asarray(labelled, dtype=np.int64)
-    sums = np.bincount(components.ravel(), weights=probs.ravel(), minlength=count)
-    sizes = np.bincount(components.ravel(), minlength=count)
-    contours, hierarchy = cv2.findContours(mask8, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-    links = hierarchy[0]
-    pieces = []
-    for i, outer in enumerate(contours):
-        if links[i][3] != -1:
-            continue
-        holes = []
-        child = links[i][2]
-        while child != -1:
-            holes.append(_hole(contours[child], top))
-            child = links[child][0]
-        # One difference with all holes: one at a time is quadratic in the hole count.
-        geometry = _filled(outer, top)
-        if holes:
-            geometry = geometry.difference(shapely.union_all(holes))
-        x, y = outer[0, 0]
-        component = components[y, x]
-        pieces.append(_Piece(geometry, class_id, float(sums[component]), int(sizes[component])))
-    return pieces
-
-
-def _ring(contour: NDArray[Any], top: int) -> tuple[Any, Any]:
-    """The pixel centres of ``contour`` as (interior polygon, half-pixel-wide boundary)."""
-    points = contour[:, 0, :].astype(np.float64) + (0.5, top + 0.5)
-    if len(points) == 1:
-        edge = Point(points[0]).buffer(0.5, cap_style="square")
-    else:
-        # Buffered one segment at a time: a pixel-centre contour can run back over itself,
-        # and GEOS mis-buffers such a line as a whole, dropping parts of the boundary.
-        ring = np.vstack([points, points[:1]])
-        segments = shapely.linestrings(np.stack([ring[:-1], ring[1:]], axis=1))
-        edge = shapely.union_all(shapely.buffer(segments, 0.5, cap_style="square"))
-    interior = shapely.make_valid(Polygon(points)) if len(points) >= 3 else Polygon()
-    return interior, edge
-
-
-def _filled(contour: NDArray[Any], top: int) -> Any:
-    """The pixels inside and on an outer boundary."""
-    interior, edge = _ring(contour, top)
-    return shapely.union(interior, edge)
-
-
-def _hole(contour: NDArray[Any], top: int) -> Any:
-    """The background pixels enclosed by a hole boundary (traced on the foreground)."""
-    interior, edge = _ring(contour, top)
-    return shapely.difference(interior, edge)
-
-
-def _merge(pieces: list[_Piece]) -> list[_Piece]:
-    """Union every group of same-class pieces that touch across band boundaries."""
-    merged = []
-    for class_id in sorted({p.class_id for p in pieces}):
-        group = [p for p in pieces if p.class_id == class_id]
-        tree = shapely.STRtree([p.geometry for p in group])
-        left, right = tree.query([p.geometry for p in group], predicate="intersects")
-        for indices in _connected(len(group), zip(left.tolist(), right.tolist(), strict=True)):
-            members = [group[i] for i in indices]
-            merged.append(
-                _Piece(
-                    shapely.unary_union([m.geometry for m in members]),
-                    class_id,
-                    sum(m.prob_sum for m in members),
-                    sum(m.pixels for m in members),
-                )
-            )
-    return merged
-
-
-def _connected(n: int, pairs: Iterable[tuple[int, int]]) -> list[list[int]]:
-    """Connected components (union-find) of ``n`` nodes joined by ``pairs``."""
-    parent = list(range(n))
-
-    def root(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    for a, b in pairs:
-        parent[root(a)] = root(b)
-    groups: dict[int, list[int]] = {}
-    for i in range(n):
-        groups.setdefault(root(i), []).append(i)
-    return list(groups.values())
-
-
-def _fill_holes(pieces: list[_Piece], max_px: float) -> list[_Piece]:
-    """Fill holes smaller than ``max_px`` output px² that hold no other class's region,
-    and drop the same-class islands inside them."""
-    if max_px <= 0 or not pieces:
-        return pieces
-    geometries = [p.geometry for p in pieces]
-    tree = shapely.STRtree(geometries)
-    dropped: set[int] = set()
-    filled: dict[int, Any] = {}
-    for i, piece in enumerate(pieces):
-        polygons = list(getattr(piece.geometry, "geoms", [piece.geometry]))
-        holes = [Polygon(ring) for poly in polygons for ring in poly.interiors]
-        small = [h for h in holes if h.area < max_px]
-        if not small:
-            continue
-        hole_ids, inside = tree.query(small, predicate="contains")
-        blocked = {
-            h for h, j in zip(hole_ids, inside, strict=True) if pieces[j].class_id != piece.class_id
-        }
-        fill = [small[h] for h in range(len(small)) if h not in blocked]
-        if not fill:
-            continue
-        dropped |= {int(j) for h, j in zip(hole_ids, inside, strict=True) if h not in blocked}
-        filled[i] = shapely.union_all([piece.geometry, *fill])
-    return [
-        _Piece(filled.get(i, p.geometry), p.class_id, p.prob_sum, p.pixels)
-        for i, p in enumerate(pieces)
-        if i not in dropped
-    ]
-
-
-def _chaikin(geometry: Any, rounds: int) -> Any:
-    """``rounds`` of Chaikin corner cutting on every ring of a (Multi)Polygon."""
-    if rounds == 0:
-        return geometry
-
-    def cut(ring: Any) -> NDArray[np.float64]:
-        points = np.asarray(ring.coords)[:-1]
-        for _ in range(rounds):
-            following = np.roll(points, -1, axis=0)
-            points = np.stack(
-                [0.75 * points + 0.25 * following, 0.25 * points + 0.75 * following], axis=1
-            ).reshape(-1, 2)
-        return points
-
-    polygons = [
-        Polygon(cut(p.exterior), [cut(h) for h in p.interiors])
-        for p in getattr(geometry, "geoms", [geometry])
-        if not p.is_empty
-    ]
-    return polygons[0] if len(polygons) == 1 else shapely.MultiPolygon(polygons)
-
-
-def _polygonal(geometry: Any) -> Any:
-    """The Polygon or MultiPolygon made of ``geometry``'s polygon parts, or None."""
-    parts = [
-        p
-        for p in shapely.get_parts(shapely.get_parts(geometry))
-        if isinstance(p, Polygon) and not p.is_empty
-    ]
-    if not parts:
-        return None
-    return parts[0] if len(parts) == 1 else MultiPolygon(parts)
