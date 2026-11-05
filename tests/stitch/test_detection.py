@@ -1,10 +1,8 @@
-import logging
 import time
 from dataclasses import replace
 
 import numpy as np
 import pytest
-import shapely
 import torch
 
 from pathoinfer.registry.model_card import DetectionCard, parse_card
@@ -12,7 +10,7 @@ from pathoinfer.stitch.base import StitchThread
 from pathoinfer.stitch.detection import Detections, DetectionStitcher
 from pathoinfer.tiling.grid import SlideGrid, TileSpec
 
-from .test_segmentation import CORNER, DOWNSAMPLE, SIZE, SLIDE_MPP, TILE, grid
+from .test_segmentation import CORNER, DOWNSAMPLE, SIZE, TILE, grid
 
 SLOTS = 300  # detections per tile, as a DETR-style model returns them
 
@@ -173,25 +171,8 @@ def test_score_threshold_defaults_to_the_card_and_can_be_overridden() -> None:
 
 
 def test_low_overlap_is_warned_about(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING):
-        DetectionStitcher(card(overlap=0.25), grid())
+    DetectionStitcher(card(overlap=0.25), grid())
     assert "below the card's recommended 64 px" in caplog.text
-
-
-def test_features_carry_geometry_and_measurements() -> None:
-    objects = squares(np.array([[1000.0, 1000.0], [2000.0, 2000.0]]), 40)
-    found = stitch(objects, card(probs=True))
-    names = ["tumour", "lymphocyte"]
-    boxes = found.to_features(names, SLIDE_MPP, "box")
-    points = found.to_features(names, SLIDE_MPP, "point")
-    assert all(f.geometry.geom_type == "Polygon" for f in boxes)
-    assert all(f.geometry.geom_type == "Point" for f in points)
-    first = next(f for f in boxes if f.class_id == 0)
-    assert first.measurements["area_um2"] == pytest.approx(40 * 40 * SLIDE_MPP**2)
-    assert first.measurements["prob_tumour"] == pytest.approx(0.8)
-    assert first.measurements["score"] == pytest.approx(0.9)
-    assert "area_um2" not in points[0].measurements
-    assert shapely.equals(points[0].geometry, shapely.centroid(boxes[0].geometry))
 
 
 def test_stitch_thread_runs_the_detection_stitcher() -> None:

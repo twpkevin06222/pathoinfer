@@ -6,7 +6,6 @@ the model never waits on stitching and a slow stitcher back-pressures the reader
 of filling memory.
 """
 
-import logging
 import queue
 import threading
 from dataclasses import dataclass, field
@@ -14,12 +13,11 @@ from types import TracebackType
 from typing import Any, Protocol, Self
 
 import numpy as np
+from loguru import logger
 from numpy.typing import NDArray
 
 from pathoinfer.runtime.base import Outputs
 from pathoinfer.tiling.grid import TileSpec
-
-log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -99,16 +97,16 @@ class StitchThread:
             if self._error is None:
                 try:
                     self.stitcher.add(*item)
-                except Exception as e:
-                    log.exception("stitcher failed")
+                except Exception as e:  # noqa: BLE001  re-raised from put/finalize
+                    logger.exception("stitcher failed")
                     self._error = e
         if item is None:
             finalize = False
         if finalize and self._error is None:
             try:
                 self._result = self.stitcher.finalize()
-            except Exception as e:
-                log.exception("stitcher failed to finalize")
+            except Exception as e:  # noqa: BLE001  re-raised from finalize
+                logger.exception("stitcher failed to finalize")
                 self._error = e
 
     def _raise(self) -> None:

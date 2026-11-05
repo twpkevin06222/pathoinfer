@@ -106,9 +106,9 @@ Two pitfalls the code avoids, both covered by tests:
 
 `finalize()` returns `StitchResult(features=[], detections=Detections(...))`: NumPy
 columns `boxes` (level-0 `xyxy`), `scores`, `labels` and, when the card names a
-`class_probs` output, `class_probs`. No Python object exists per detection until a writer
-calls `detections.to_features(class_names, slide_mpp, "box" | "point")`, which gives box
-Polygons or centre Points with `score`, `area_um2` (boxes) and `prob_<class>`.
+`class_probs` output, `class_probs`. Writers read them as columns too
+(`io.objects.ObjectTable.from_result`), so no Python object exists per detection.
+Output formats are in `docs/outputs.md`.
 
 ## Other tasks
 

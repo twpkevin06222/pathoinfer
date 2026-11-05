@@ -10,6 +10,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "duckdb>=2.0.0",
+    "loguru>=0.7.3",
     "matplotlib>=3.11.2",
     "numpy>=2.5.4",
     "opencv-python-headless>=5.0.0.93",
@@ -37,7 +38,7 @@ serve = ["fastapi", "uvicorn"]
 convert = ["nvidia-modelopt", "llmcompressor"]
 mlflow = ["mlflow-skinny"]
 hf = ["huggingface-hub"]
-# Only for io/geodataframe.py's to_geodataframe(); never used by core or tests.
+# Only for io/interop.py's to_geodataframe(); never used by core or tests.
 geopandas = ["geopandas"]
 all = ["pathoinfer[onnx,trt,triton,vllm-client,serve,convert,mlflow,hf,geopandas]"]
 
@@ -72,6 +73,7 @@ extend-select = ["B", "I", "LOG", "T20", "TID", "UP"]
 
 # The hard rules in CLAUDE.md that a linter can enforce.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
+"logging".msg = "Log with loguru: from loguru import logger (see pathoinfer._logging)."
 "pandas".msg = "No pandas: tables are Polars, queries are DuckDB."
 "geopandas".msg = "No geopandas: geometry is shapely, tables are Polars."
 "pathotrain".msg = "pathoinfer never imports pathotrain; the contract is the exported model metadata."
@@ -88,9 +90,7 @@ extend-immutable-calls = ["patchology.ArtifactConfig", "patchology.ColorConfig",
 known-first-party = ["patchology", "pathoinfer"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/pathoinfer/io/geodataframe.py" = ["TID251"]  # the one geopandas interop helper
-"src/pathoinfer/cli.py" = ["T20"]  # the CLI reports to the terminal
-"scripts/*" = ["T20"]
+"src/pathoinfer/io/interop.py" = ["TID251"]  # the one geopandas interop helper
 
 [tool.mypy]
 strict = true

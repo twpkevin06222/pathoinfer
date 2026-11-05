@@ -23,25 +23,24 @@ see an object of width ``W`` cut at their own edges, so their boxes share only t
 ``nms_iou`` is below that. Objects cut by two seams (a corner) overlap less still. Raising
 the overlap is the dependable fix; NMS is the fallback.
 
-Scale. Everything is held as NumPy columns (one chunk per batch, joined once); no Python
-object per detection exists until a writer asks for features.
+Scale. Everything is held as NumPy columns (one chunk per batch, joined once); writers
+read them as columns too (``io.objects.ObjectTable``), so no Python object per detection
+exists.
 """
 
-import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
 import shapely
 import torch
+from loguru import logger
 from numpy.typing import NDArray
 
 from pathoinfer.registry.model_card import DetectionCard
 from pathoinfer.runtime.base import Outputs
-from pathoinfer.stitch.base import Feature, StitchResult
+from pathoinfer.stitch.base import StitchResult
 from pathoinfer.tiling.grid import SlideGrid, TileSpec
-
-log = logging.getLogger(__name__)
 
 Geometry = Literal["point", "box"]
 
@@ -66,26 +65,6 @@ class Detections:
         if kind == "point":
             return np.asarray(shapely.points(self.centroids()))
         return np.asarray(shapely.box(*self.boxes.T))
-
-    def to_features(
-        self, class_names: list[str], slide_mpp: float, kind: Geometry = "box"
-    ) -> list[Feature]:
-        """One Feature per detection, for writers. Measurements: ``score``, ``area_um2``
-        (boxes only) and ``prob_<class>`` per class when the model outputs probabilities."""
-        geometries = self.geometries(kind)
-        widths, heights = (self.boxes[:, 2:] - self.boxes[:, :2]).T
-        areas = widths * heights * slide_mpp**2
-        features = []
-        for i in range(len(self)):
-            measurements = {"score": float(self.scores[i])}
-            if kind == "box":
-                measurements["area_um2"] = float(areas[i])
-            if self.class_probs is not None:
-                for name, p in zip(class_names, self.class_probs[i], strict=True):
-                    measurements[f"prob_{name}"] = float(p)
-            label = int(self.labels[i])
-            features.append(Feature(geometries[i], label, class_names[label], measurements))
-        return features
 
 
 @dataclass
@@ -113,8 +92,8 @@ class DetectionStitcher:
         self.margin = grid.overlap * grid.downsample
         recommended = round(card.recommended_overlap * grid.tile_size)
         if grid.overlap < recommended:
-            log.warning(
-                "grid overlap %d px is below the card's recommended %d px; objects wider than "
+            logger.warning(
+                "grid overlap {} px is below the card's recommended {} px; objects wider than "
                 "about the overlap may be reported twice (consider nms_iou)",
                 grid.overlap,
                 recommended,
@@ -181,7 +160,7 @@ class DetectionStitcher:
                 detections.tiles[keep],
                 detections.near_edge[keep],
             )
-        log.info("detection: %d objects", len(detections.scores))
+        logger.info("detection: {} objects", len(detections.scores))
         return StitchResult(
             features=[],
             detections=Detections(

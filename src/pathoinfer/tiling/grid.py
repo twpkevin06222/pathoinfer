@@ -47,6 +47,7 @@ from patchology import (
 from patchology.reader.base import LEVEL_DOWNSAMPLE_TOLERANCE
 from patchology.tiling import tile_fractions
 from patchology.tissue.mask import MaskSource
+from pathoinfer._logging import log_call
 from pathoinfer.tiling.slide_id import slide_id
 
 
@@ -131,6 +132,7 @@ class SlideGrid:
         return x / self.downsample, y / self.downsample
 
 
+@log_call
 def build_grid(
     slide: SlideReader,
     tile_size: int,
