@@ -84,17 +84,10 @@ def test_card_dtype_must_match_the_graph() -> None:
         OnnxRuntime(card, FIXTURES / "tiny_seg" / "model.onnx", device="cpu")
 
 
-@pytest.mark.parametrize(
-    ("framework", "error"),
-    [("tensorrt", NotImplementedError), ("safetensors", ValueError)],
-)
-def test_factory_rejects_frameworks_without_a_runtime(
-    framework: str, error: type[Exception]
-) -> None:
+def test_factory_rejects_weights_only_models() -> None:
     card, model_dir = load_model(FIXTURES / "tiny_seg")
-    suffix = {"tensorrt": "model.plan", "safetensors": "model.safetensors"}[framework]
-    other = card.model_copy(update={"framework": framework, "file": suffix})
-    with pytest.raises(error):
+    other = card.model_copy(update={"framework": "safetensors", "file": "model.safetensors"})
+    with pytest.raises(ValueError, match="weights only"):
         make_runtime(other, model_dir, RuntimeConfig())
 
 

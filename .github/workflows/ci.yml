@@ -33,7 +33,9 @@ jobs:
           uv pip install torch --index-url https://download.pytorch.org/whl/cpu
           uv pip install "patchology @ git+https://github.com/twpkevin06222/patchology@${PATCHOLOGY_REF}"
           # --no-sources: ignore the workspace's CUDA torch index; the CPU torch above stays.
-          uv pip install --no-sources -e ".[onnx]" --group dev
+          # onnx runs the FP16, ONNX Runtime INT8 and parity tests; ModelOpt and TensorRT
+          # (the rest of [convert] and [trt]) are too large for CI and their tests skip.
+          uv pip install --no-sources -e ".[onnx]" "onnx>=1.23.2" --group dev
           uv pip list | grep -Ei "^(torch|patchology|pathoinfer|onnxruntime|polars|duckdb) "
 
       - name: No pathotrain in the environment

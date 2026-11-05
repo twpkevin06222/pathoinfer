@@ -8,5 +8,5 @@ from pathoinfer._extras import extra, require
 
 
 def quantise_vlm(folder: Path, out: Path) -> Path:
-    require("llmcompressor", extra("convert"))
+    require("llmcompressor", extra("vlm-convert"))
     raise NotImplementedError("lands after v0.3")

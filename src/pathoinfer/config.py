@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from patchology import ArtifactConfig, Backend, TissueConfig
 from pathoinfer.registry.model_card import Byte, Task
@@ -130,9 +130,13 @@ class RunConfig(_Strict):
 
     def slide_paths(self) -> list[Path]:
         """Every slide the ``slides`` entry names, in order, duplicates removed."""
-        entries = [self.slides] if isinstance(self.slides, str) else self.slides
-        paths = [p for entry in entries for p in _expand(entry)]
-        return list(dict.fromkeys(paths))
+        return expand_slides(self.slides)
+
+
+def expand_slides(slides: str | list[str]) -> list[Path]:
+    """Paths from a path, a glob, a list file or a list of these, duplicates removed."""
+    entries = [slides] if isinstance(slides, str) else slides
+    return list(dict.fromkeys(p for entry in entries for p in _expand(entry)))
 
 
 def _expand(entry: str) -> list[Path]:
@@ -155,3 +159,74 @@ def _expand(entry: str) -> list[Path]:
 def load_config(path: str | Path) -> RunConfig:
     with open(path) as f:
         return RunConfig.model_validate(yaml.safe_load(f))
+
+
+class CalibrationConfig(_Strict):
+    """Calibration tiles, read through patchology at the model's tile size and mpp.
+    List slides across scanners, stains and tissue types; tiles are spread evenly over
+    them."""
+
+    slides: str | list[str]
+    tiles: int = Field(512, gt=0)
+    seed: int = 0
+    backend: Backend = "openslide"
+
+
+class QuantConfig(_Strict):
+    """Static post-training quantisation (``pathoinfer convert ptq``).
+
+    ``engine`` ``modelopt`` (NVIDIA ModelOpt) targets TensorRT, keeps excluded layers in
+    FP16 and does INT8 and FP8; ``ort`` (ONNX Runtime) does INT8 that runs in ONNX
+    Runtime too, keeping excluded layers in FP32. Kept in high precision: nodes whose op
+    type is in ``keep_ops``, whose name matches a glob in ``keep_nodes`` (lower case), and
+    with ``keep_ends`` the first and last Conv/MatMul/Gemm. The defaults suit CNNs and
+    ViT backbones (LayerNorm, Softmax, attention)."""
+
+    precision: Literal["int8", "fp8"] = "int8"
+    engine: Literal["modelopt", "ort"] = "modelopt"
+    method: Literal["entropy", "minmax", "percentile"] = "entropy"
+    percentile: float = Field(99.999, gt=50, lt=100)
+    calibration: CalibrationConfig
+    keep_ops: list[str] = ["LayerNormalization", "Softmax"]
+    keep_nodes: list[str] = ["*attn*", "*attention*"]
+    keep_ends: bool = True
+
+    @model_validator(mode="after")
+    def _fp8_needs_modelopt(self) -> "QuantConfig":
+        if self.precision == "fp8" and self.engine != "modelopt":
+            raise ValueError("fp8 needs engine: modelopt")
+        return self
+
+
+class ParityTolerances(_Strict):
+    """Bounds a converted model must meet against its reference, per task: segmentation
+    Dice per class (polygon level), detection F1 per class and relative count difference,
+    classification one-vs-rest AUC per class (the reference's argmax as labels)."""
+
+    dice_min: float = Field(0.97, ge=0, le=1)
+    f1_min: float = Field(0.97, ge=0, le=1)
+    count_diff_max: float = Field(0.03, ge=0)
+    auc_min: float = Field(0.99, ge=0, le=1)
+
+
+class ParityConfig(_Strict):
+    """``pathoinfer convert parity``: both models run on the same mini-slides (windows of
+    ``window_tiles`` x ``window_tiles`` grid tiles around tissue, ``windows`` per slide)
+    through the real stitchers, with this config's stitch settings."""
+
+    slides: str | list[str]
+    window_tiles: int = Field(6, gt=0)
+    windows: int = Field(2, gt=0)
+    seed: int = 0
+    backend: Backend = "openslide"
+    reference_device: str = Field("auto", pattern=r"^(auto|cpu|cuda(:\d+)?)$")
+    candidate: RuntimeConfig = RuntimeConfig()
+    iou: float = Field(0.5, gt=0, le=1)
+    tolerances: ParityTolerances = ParityTolerances()
+    segmentation: SegmentationOptions = SegmentationOptions()
+    detection: DetectionOptions = DetectionOptions()
+
+
+def load_yaml[T: BaseModel](path: str | Path, model: type[T]) -> T:
+    with open(path) as f:
+        return model.model_validate(yaml.safe_load(f))

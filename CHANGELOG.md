@@ -9,6 +9,21 @@ config or output formats; the entry says so.
 
 ### Added
 
+- `pathoinfer convert fp16|ptq|trt|parity`:
+  - FP16 conversion with ONNX Runtime's converter; I/O dtypes and the FP32 op block list
+    are configurable.
+  - INT8/FP8 static PTQ with NVIDIA ModelOpt (TensorRT targets, kept layers in FP16) or
+    ONNX Runtime (INT8, kept layers in FP32), calibrated on tiles read through patchology
+    from a slide list (entropy, minmax or percentile). First/last layers, LayerNorm,
+    Softmax and attention are kept in high precision by default.
+  - TensorRT plans built as strongly typed networks with a batch profile, cached by
+    model, GPU, TensorRT version, precision and profile.
+  - A parity gate: both models run through the real stitchers on mini-slides (Dice, F1
+    and count difference, AUC per class). A pass writes the variant with
+    `provenance.parity` and can register it in MLflow under an alias; a fail names the
+    worst classes and layers and writes nothing.
+- TensorRT plan runtime: `framework: tensorrt` model folders run in `pathoinfer run`.
+- ModelCard: optional `provenance.parity` (schema stays version 1).
 - `stitch.heatmap.HeatmapStitcher`: tile classification to one probability vector per
   tile core (overlap-area weighted), per-class float16 rasters, one QuPath detection per
   core with `prob_<class>` measurements, optional thresholded region polygons and
@@ -26,7 +41,10 @@ config or output formats; the entry says so.
   at most 4 px first); long straight edges no longer lose large corners. Smoothed
   polygons have fewer vertices.
 - The mask-to-polygon code moved from `stitch/segmentation.py` to `post/vectorise.py`
-  and is shared by segmentation and heatmaps; segmentation output is unchanged.
+  and is shared by segmentation and heatmaps.
+- Extras: `[convert]` is now NVIDIA ModelOpt (>= 0.48), `onnx` and the helpers
+  ModelOpt's ONNX quantiser imports, listed without ModelOpt's own `[onnx]` pins so
+  onnxruntime-gpu 1.31 stays; `llmcompressor` moved to the new `[vlm-convert]`.
 
 ## [0.1.0] - 2026-11-06
 

@@ -101,11 +101,27 @@ class ClassificationOutput(_Strict):
         return (self.tensor,)
 
 
+class Parity(_Strict):
+    """How a converted model matched its full-precision reference through the real
+    stitchers. Written only when every metric was within its tolerance."""
+
+    reference: str = Field(description="name@version of the full-precision model compared.")
+    tile_set_hash: str = Field(description="Hash of the tiles both models ran on.")
+    metrics: dict[str, float] = Field(
+        description="Worst value of each metric over classes, e.g. dice_min, f1_min, auc_min."
+    )
+    tolerances: dict[str, float] = Field(description="The bound each metric had to meet.")
+    checked_at: str = Field(description="UTC time of the check, ISO 8601.")
+
+
 class Provenance(_Strict):
     training_run_id: str | None = None
     calibration_set_hash: str | None = None
     parent_model: str | None = Field(
         None, description="name@version of the model this one was converted from."
+    )
+    parity: Parity | None = Field(
+        None, description="Parity with the reference model, for converted models."
     )
     source_metadata: dict[str, Any] = Field(
         {}, description="Producer metadata kept as is, e.g. a legacy 'pathotrain' ONNX key."

@@ -11,16 +11,26 @@
                                             and the flags.
 ``pathoinfer card validate FOLDER``         check a model folder's card and, for ONNX, that
                                             the graph matches it.
+``pathoinfer convert fp16 SOURCE OUT``      FP32 ONNX -> FP16 ONNX model folder.
+``pathoinfer convert ptq SOURCE OUT --config QUANT.yaml``
+                                            INT8/FP8 static PTQ, calibrated on slides.
+``pathoinfer convert trt SOURCE OUT``       TensorRT plan for this GPU (cached).
+``pathoinfer convert parity REFERENCE CANDIDATE OUT --config PARITY.yaml``
+                                            compare through the real stitchers; on a pass
+                                            write OUT with the parity in its card (and
+                                            register it with --register NAME --alias A).
 
 ``--log-level LEVEL`` (or ``-v`` for DEBUG), before the command, sets pathoinfer's and
 patchology's log level; the default comes from ``PATHOINFER_LOG_LEVEL`` and
 ``PATCHOLOGY_LOG_LEVEL``.
 
-Only ``run`` imports torch, so every other command starts fast.
+Only ``run`` and ``convert`` import torch, so every other command starts fast.
 """
 
 import argparse
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +40,7 @@ from pydantic import ValidationError
 
 from patchology import SlideOpenError, open_slide
 from pathoinfer._logging import PACKAGES, set_log_level
-from pathoinfer.config import RunConfig, load_config
+from pathoinfer.config import ParityConfig, QuantConfig, RunConfig, load_config, load_yaml
 from pathoinfer.registry.create import create_folder
 from pathoinfer.registry.loader import CardError, graph_problems, load_model, validate_folder
 from pathoinfer.tiling.slide_id import slide_id
@@ -104,6 +114,44 @@ def _parser() -> argparse.ArgumentParser:
     check = card.add_parser("validate", help="validate a model folder")
     check.add_argument("folder", type=Path)
     check.set_defaults(handler=lambda args: _validate_card(args.folder))
+
+    convert = commands.add_parser("convert", help="convert models offline").add_subparsers(
+        dest="convert_command", required=True
+    )
+    fp16 = convert.add_parser("fp16", help="FP32 ONNX -> FP16 ONNX")
+    fp16.add_argument("source", help="model source (folder, ONNX file, models:/, hf://)")
+    fp16.add_argument("out", type=Path, help="new model folder")
+    fp16.add_argument(
+        "--fp16-io", action="store_true", help="make the graph's inputs/outputs float16 too"
+    )
+    fp16.add_argument(
+        "--keep-fp32", nargs="+", default=[], metavar="OP", help="op types to keep in FP32"
+    )
+    fp16.set_defaults(handler=_convert_fp16)
+    ptq = convert.add_parser("ptq", help="INT8/FP8 static post-training quantisation")
+    ptq.add_argument("source")
+    ptq.add_argument("out", type=Path)
+    ptq.add_argument("--config", type=Path, required=True, help="QuantConfig YAML")
+    ptq.set_defaults(handler=_convert_ptq)
+    plan = convert.add_parser("trt", help="TensorRT plan for this GPU")
+    plan.add_argument("source")
+    plan.add_argument("out", type=Path)
+    plan.add_argument(
+        "--batch", type=int, nargs=3, default=[1, 32, 64], metavar=("MIN", "OPT", "MAX")
+    )
+    plan.add_argument("--workspace-gb", type=float, default=4.0)
+    plan.add_argument("--device", type=int, default=0, help="CUDA device index")
+    plan.set_defaults(handler=_convert_trt)
+    parity = convert.add_parser("parity", help="parity gate for a converted model")
+    parity.add_argument("reference")
+    parity.add_argument("candidate")
+    parity.add_argument("out", type=Path, help="new model folder written on a pass")
+    parity.add_argument("--config", type=Path, required=True, help="ParityConfig YAML")
+    parity.add_argument("--register", metavar="NAME", help="MLflow registered model name")
+    parity.add_argument("--alias", help="MLflow alias, e.g. fp16-blackwell (with --register)")
+    parity.add_argument("--tracking-uri", help="MLflow tracking URI (default: environment)")
+    parity.add_argument("--report", type=Path, help="write the parity report as JSON")
+    parity.set_defaults(handler=_convert_parity)
     return parser
 
 
@@ -145,6 +193,55 @@ def _config_problems(cfg: RunConfig) -> list[str]:
     if card.task == "segmentation" and output_mpp is not None and output_mpp < card.input.mpp:
         problems.append(f"segmentation.output_mpp {output_mpp} is finer than the model's")
     return problems
+
+
+def _convert_fp16(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.fp16 import to_fp16
+
+    to_fp16(args.source, args.out, keep_io_types=not args.fp16_io, keep_fp32_ops=args.keep_fp32)
+    return 0
+
+
+def _convert_ptq(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.ptq import quantise
+
+    quantise(args.source, args.out, load_yaml(args.config, QuantConfig))
+    return 0
+
+
+def _convert_trt(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.tensorrt import build_plan
+
+    low, opt, high = args.batch
+    build_plan(
+        args.source,
+        args.out,
+        min_batch=low,
+        opt_batch=opt,
+        max_batch=high,
+        workspace_gb=args.workspace_gb,
+        device=args.device,
+    )
+    return 0
+
+
+def _convert_parity(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.parity import gate
+
+    if bool(args.register) != bool(args.alias):
+        raise ValueError("--register and --alias go together")
+    register = (args.register, args.alias) if args.register else None
+    report = gate(
+        args.reference,
+        args.candidate,
+        load_yaml(args.config, ParityConfig),
+        args.out,
+        register,
+        args.tracking_uri,
+    )
+    if args.report:
+        args.report.write_text(json.dumps(asdict(report), indent=2) + "\n")
+    return 0 if report.passed else 1
 
 
 def _info_model(args: argparse.Namespace) -> int:
