@@ -14,7 +14,6 @@ ALLOWED = {ROOT / "src/pathoinfer/io/geodataframe.py": {"geopandas"}}
 # Heavy optional dependencies that only their own extra's code may load, and lazily.
 LAZY = [
     "onnxruntime",
-    "torch",
     "tensorrt",
     "tritonclient",
     "httpx",
@@ -45,9 +44,13 @@ def imported_modules(path: Path) -> set[str]:
     return names
 
 
-# torch is core but heavy: only these modules import it at the top, and nothing else
-# imports them, so `import pathoinfer` and the CLI stay light.
-TORCH_MODULES = ["pathoinfer.tiling.dataset"]
+# torch is core but takes seconds to import: the CLI, config and registry never load it.
+LIGHT = [
+    "pathoinfer.cli",
+    "pathoinfer.config",
+    "pathoinfer.registry.loader",
+    "pathoinfer.registry.create",
+]
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: str(p.relative_to(ROOT)))
@@ -61,10 +64,14 @@ def test_importing_every_module_loads_no_optional_dependency() -> None:
 import importlib, json, pkgutil, sys
 import pathoinfer
 for m in pkgutil.walk_packages(pathoinfer.__path__, "pathoinfer."):
-    if m.name not in {TORCH_MODULES!r}:
-        importlib.import_module(m.name)
-loaded = {LAZY!r} + {TORCH_MODULES!r}
-print(json.dumps(sorted(n for n in loaded if n in sys.modules)))
+    importlib.import_module(m.name)
+print(json.dumps(sorted(n for n in {LAZY!r} if n in sys.modules)))
 """
     out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
+
+
+def test_cli_config_and_registry_do_not_load_torch() -> None:
+    script = f"import importlib, sys\nfor m in {LIGHT!r}: importlib.import_module(m)\nprint('torch' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

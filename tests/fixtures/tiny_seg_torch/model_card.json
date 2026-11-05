@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "tiny-seg",
+  "version": "1",
+  "task": "segmentation",
+  "framework": "torch",
+  "file": "model.pt",
+  "precision": "fp32",
+  "input": {
+    "name": "image",
+    "tile_size": 16,
+    "mpp": 0.5,
+    "channel_order": "RGB",
+    "layout": "NCHW",
+    "dtype": "float32",
+    "normalisation": {
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ],
+      "scale": 0.00392156862745098
+    },
+    "icc": true
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "background",
+      "color": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 1,
+      "name": "tumor",
+      "color": [
+        200,
+        0,
+        0
+      ]
+    }
+  ],
+  "background_id": 0,
+  "output": {
+    "tensor": "logits",
+    "activation": "logits",
+    "n_classes": 2
+  },
+  "recommended_overlap": 0.25,
+  "provenance": {
+    "training_run_id": "fixture"
+  }
+}
