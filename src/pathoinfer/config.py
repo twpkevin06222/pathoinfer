@@ -1,6 +1,7 @@
 """Inference settings, one YAML file per task (examples in ``configs/``)."""
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,6 +31,17 @@ class PatchologyInput(_Strict):
     artifacts: ArtifactConfig = ArtifactConfig()
 
 
+class RuntimeConfig(_Strict):
+    """How the model executes. ``device`` is ``auto`` (CUDA when available), ``cpu``,
+    ``cuda`` or ``cuda:N``. ``tensorrt`` lets ONNX models use the TensorRT EP when its
+    libraries load. ``autocast`` applies to PyTorch models only."""
+
+    device: str = Field("auto", pattern=r"^(auto|cpu|cuda(:\d+)?)$")
+    batch_size: int = Field(32, gt=0)
+    tensorrt: bool = True
+    autocast: Literal["bf16", "fp16"] | None = None
+
+
 class InferenceConfig(_Strict):
     """One task's settings. ``model`` is an ``.onnx`` path or ``models:/NAME/<version>``.
     ``class_colors`` replaces the default colour of any class, by class name."""
@@ -37,6 +49,7 @@ class InferenceConfig(_Strict):
     task: Task
     model: str
     patchology: PatchologyInput = PatchologyInput()
+    runtime: RuntimeConfig = RuntimeConfig()
     class_colors: dict[str, tuple[Byte, Byte, Byte]] = {}
 
 

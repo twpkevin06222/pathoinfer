@@ -3,7 +3,7 @@
 from typing import Protocol
 
 from pathoinfer.runtime.base import Outputs
-from pathoinfer.tiling import TileSpec
+from pathoinfer.tiling.grid import TileSpec
 
 
 class Stitcher[R](Protocol):

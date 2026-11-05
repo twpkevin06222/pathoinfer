@@ -12,5 +12,12 @@ patchology:
   tissue: {method: triangle}      # patchology TissueConfig fields
   artifacts: {pen: true, blur: false}  # patchology ArtifactConfig fields
 
+# How the model executes.
+runtime:
+  device: auto                    # cuda when available, else cpu; or cpu, cuda, cuda:1
+  batch_size: 32                  # fixed; the last batch is padded
+  tensorrt: true                  # ONNX models use the TensorRT EP when it loads
+  autocast: null                  # PyTorch models only: bf16 or fp16
+
 # Default: tab20 colours in class order. Replace any by class name.
 class_colors: {}                  # e.g. {tumor: [255, 0, 0]}
