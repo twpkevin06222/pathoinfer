@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from loguru import logger
 
 from pathoinfer.config import RuntimeConfig
 from pathoinfer.registry.loader import load_model
@@ -75,8 +76,8 @@ def main() -> None:
     args = parser.parse_args()
 
     gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none"
-    print(f"GPU: {gpu}; batch {args.batch_size}; median (min-max) of {args.repeats} repeats")
-    print(f"{'model':<24} {'runtime':<8} {'device':<6} {'precision':<12} {'tiles/s':>20}")
+    logger.info(f"GPU: {gpu}; batch {args.batch_size}; median (min-max) of {args.repeats} repeats")
+    logger.info(f"{'model':<24} {'runtime':<8} {'device':<6} {'precision':<12} {'tiles/s':>20}")
     for folder in args.models:
         card, _ = load_model(folder)
         for config in configs(card.framework, args):
@@ -84,7 +85,7 @@ def main() -> None:
             mode = config.get("autocast") or ("trt" if config.get("tensorrt") else None)
             precision = card.precision + (f"+{mode}" if mode else "")
             spread = f"{statistics.median(rates):.0f} ({min(rates):.0f}-{max(rates):.0f})"
-            print(
+            logger.info(
                 f"{card.name:<24} {card.framework:<8} {config['device']:<6} {precision:<12} {spread:>20}"
             )
 

@@ -14,6 +14,8 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from loguru import logger
+
 from patchology import open_slide
 from pathoinfer.tiling.dataset import make_loader
 from pathoinfer.tiling.grid import SlideGrid, build_grid
@@ -55,26 +57,28 @@ def main() -> None:
     started = time.perf_counter()
     with open_slide(args.slide) as slide:
         grid = build_grid(slide, args.tile_size, args.mpp, args.overlap)
-    print(
+    logger.info(
         f"grid: {len(grid.tiles)} tissue tiles of {grid.n_rows * grid.n_cols}, "
         f"{args.tile_size} px at {args.mpp} mpp (slide {grid.slide_mpp:g} mpp, "
         f"level {grid.level}, read factor {grid.read_factor:.3g}), "
         f"built in {time.perf_counter() - started:.1f} s"
     )
     grid = replace(grid, tiles=grid.tiles[: args.max_tiles])
-    print(f"cpus {os.cpu_count()}, load {os.getloadavg()[0]:.1f}, timing {len(grid.tiles)} tiles")
+    logger.info(
+        f"cpus {os.cpu_count()}, load {os.getloadavg()[0]:.1f}, timing {len(grid.tiles)} tiles"
+    )
     if not args.cold:
         run(grid, 0, args.batch_size)
 
     checksums = set()
-    print(f"{'workers':>7}  {'start-up s':>10}  {'tiles/s':>8}")
+    logger.info(f"{'workers':>7}  {'start-up s':>10}  {'tiles/s':>8}")
     for workers in args.workers:
         startup, rate, _, checksum = run(grid, workers, args.batch_size)
         checksums.add(checksum)
-        print(f"{workers:>7}  {startup:>10.2f}  {rate:>8.0f}")
+        logger.info(f"{workers:>7}  {startup:>10.2f}  {rate:>8.0f}")
     assert len(checksums) == 1, f"worker counts read different pixels: {checksums}"
     mean = next(iter(checksums)) / (len(grid.tiles) * args.tile_size**2 * 3)
-    print(f"every run read the same pixels (mean value {mean:.1f})")
+    logger.info(f"every run read the same pixels (mean value {mean:.1f})")
 
 
 if __name__ == "__main__":

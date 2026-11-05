@@ -1,1 +1,71 @@
-"""Pyramidal TIFF heatmaps with tifffile. Lands after v0.3, with heatmaps."""
+"""Pyramidal heatmap TIFFs with tifffile.
+
+The full-resolution raster is the main image; each SubIFD halves it until it fits one
+tile (floats area-averaged, integers by nearest neighbour). Tiles are 256 px,
+zlib-compressed. Resolution tags give each level's physical pixel size, so viewers
+overlay the heatmap on the slide at the right scale; the ImageDescription holds the
+level-0 transform and the run metadata as JSON.
+"""
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+import tifffile
+from loguru import logger
+from numpy.typing import NDArray
+
+from pathoinfer._logging import log_call
+from pathoinfer.io.objects import RunInfo
+from pathoinfer.stitch.base import Raster
+
+TILE = 256
+
+
+@log_call
+def write_tiff(path: str | Path, raster: Raster, run: RunInfo) -> Path:
+    """Write a 2D ``raster`` whose origin is the slide's level-0 origin."""
+    path = Path(path)
+    if raster.array.ndim != 2:
+        raise ValueError(f"expected a 2D raster, got shape {raster.array.shape}")
+    # shortcut: no TIFF position tags; add XPosition/YPosition if rasters gain offsets.
+    if raster.origin != (0.0, 0.0):
+        raise ValueError(f"raster origin {raster.origin} is not the slide's (0, 0)")
+    levels = _pyramid(raster.array)
+    um_per_px = run.slide_mpp * raster.scale
+    description = json.dumps(
+        {"level0_per_px": raster.scale, "um_per_px": um_per_px, "run": run.to_dict()}
+    )
+    partial = path.with_name(path.name + ".partial")
+    with tifffile.TiffWriter(partial, bigtiff=True) as tif:
+        for i, level in enumerate(levels):
+            px_per_cm = 1e4 / um_per_px * level.shape[1] / raster.array.shape[1]
+            tif.write(
+                level,
+                tile=(TILE, TILE),
+                compression="zlib",
+                photometric="minisblack",
+                resolution=(px_per_cm, px_per_cm),
+                resolutionunit="CENTIMETER",
+                subifds=len(levels) - 1 if i == 0 else None,
+                subfiletype=1 if i else 0,
+                description=description if i == 0 else None,
+                metadata=None,
+            )
+    os.replace(partial, path)
+    logger.info("wrote {} ({} levels)", path, len(levels))
+    return path
+
+
+def _pyramid(array: NDArray[Any]) -> list[NDArray[Any]]:
+    integer = np.issubdtype(array.dtype, np.integer)
+    levels = [array]
+    while max(levels[-1].shape) > TILE:
+        h, w = levels[-1].shape
+        size = (max(1, w // 2), max(1, h // 2))
+        interpolation = cv2.INTER_NEAREST if integer else cv2.INTER_AREA
+        levels.append(np.asarray(cv2.resize(levels[-1], size, interpolation=interpolation)))
+    return levels

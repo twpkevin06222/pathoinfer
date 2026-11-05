@@ -27,6 +27,7 @@ from typing import Any, get_args
 from pydantic import ValidationError
 
 from pathoinfer._extras import extra, require
+from pathoinfer._logging import log_call
 from pathoinfer.registry import legacy
 from pathoinfer.registry.model_card import ModelCard, Task, parse_card
 from pathoinfer.registry.onnx_info import read_onnx
@@ -41,6 +42,7 @@ class CardError(ValueError):
     """A model source has no valid ModelCard."""
 
 
+@log_call
 def load_model(source: str | Path, cache_dir: Path = CACHE_DIR) -> tuple[ModelCard, Path]:
     """Return ``(card, model_dir)``; the model file is ``model_dir / card.file``."""
     text = str(source)
@@ -70,6 +72,7 @@ def resolve_local(path: Path) -> tuple[ModelCard, Path]:
     raise CardError(f"{onnx} has no model card; create one with `pathoinfer card create`")
 
 
+@log_call
 def validate_folder(folder: Path) -> ModelCard:
     """Parse ``folder/model_card.json`` and check the model file it names exists."""
     try:

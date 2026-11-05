@@ -1,1 +1,1 @@
-"""Writers: GeoJSON for viewers, Parquet for analysis, TIFF for heatmaps."""
+"""Writers: GeoJSON for viewers, Parquet for analysis, TIFF for heatmaps (``docs/outputs.md``)."""

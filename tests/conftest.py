@@ -1,6 +1,18 @@
 import shutil
+from collections.abc import Iterator
 
 import pytest
+from loguru import logger
+
+pytest_plugins = ["tests.outputs"]
+
+
+@pytest.fixture
+def caplog(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Route loguru records into pytest's caplog, as patchology's tests do."""
+    handler_id = logger.add(caplog.handler, format="{message}", level=0)
+    yield caplog
+    logger.remove(handler_id)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

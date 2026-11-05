@@ -29,7 +29,6 @@ and round to 0.1 px. Measurements: ``area_um2``, ``perimeter_um`` and ``mean_pro
 (the blended probability of the polygon's class over its pixels).
 """
 
-import logging
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -40,6 +39,7 @@ import numpy as np
 import shapely
 import torch
 import torch.nn.functional as F
+from loguru import logger
 from numpy.typing import NDArray
 from shapely.geometry import MultiPolygon, Point, Polygon
 
@@ -47,8 +47,6 @@ from pathoinfer.registry.model_card import SegmentationCard
 from pathoinfer.runtime.base import Outputs
 from pathoinfer.stitch.base import Feature, Raster, StitchResult
 from pathoinfer.tiling.grid import SlideGrid, TileSpec
-
-log = logging.getLogger(__name__)
 
 
 def gaussian_window(size: int) -> NDArray[np.float32]:
@@ -125,15 +123,15 @@ class SegmentationStitcher:
 
     def finalize(self) -> StitchResult:
         if self._bands:
-            log.warning(
-                "%d bands were missing tiles; finalising them as they are", len(self._bands)
+            logger.warning(
+                "{} bands were missing tiles; finalising them as they are", len(self._bands)
             )
             for band in sorted(self._bands):
                 self._finish_band(band)
         pieces = self._done + _merge(self._seams)
         features = [f for p in pieces if (f := self._feature(p)) is not None]
-        log.info(
-            "segmentation: %d polygons; peak canvas %.1f MiB (bands of %d x %d px at %.3g mpp)",
+        logger.info(
+            "segmentation: {} polygons; peak canvas {:.1f} MiB (bands of {} x {} px at {:.3g} mpp)",
             len(features),
             self.peak_bytes / 2**20,
             self.band_height,

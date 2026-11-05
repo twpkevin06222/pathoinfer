@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[1]
 FILES = sorted([*(ROOT / "src").rglob("*.py"), *(ROOT / "tests").rglob("*.py")])
 BANNED = {"pandas", "geopandas", "pathotrain", "vllm"}
 # The optional interop helper is the only place geopandas may appear.
-ALLOWED = {ROOT / "src/pathoinfer/io/geodataframe.py": {"geopandas"}}
+ALLOWED = {ROOT / "src/pathoinfer/io/interop.py": {"geopandas"}}
 # Heavy optional dependencies that only their own extra's code may load, and lazily.
 LAZY = [
     "onnxruntime",

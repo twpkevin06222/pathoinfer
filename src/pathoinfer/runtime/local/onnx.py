@@ -6,19 +6,17 @@ dtype comes from the card (float16 for an fp16 graph) and must match the graph's
 """
 
 import ctypes
-import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import torch
+from loguru import logger
 from torch.utils.dlpack import from_dlpack
 
 from pathoinfer._extras import extra, require
 from pathoinfer.registry.model_card import ModelCard
 from pathoinfer.runtime.base import Outputs, preprocess, resolve_device, run_in_fixed_batches
-
-log = logging.getLogger(__name__)
 
 TRT_CACHE_DIR = Path.home() / ".cache" / "pathoinfer" / "trt"
 GRAPH_DTYPES = {"tensor(float)": "float32", "tensor(float16)": "float16", "tensor(uint8)": "uint8"}
@@ -105,7 +103,7 @@ def _nvinfer_loads() -> bool:
     try:
         ctypes.CDLL(NVINFER)
     except OSError:
-        log.debug("%s not found; TensorRT EP skipped", NVINFER)
+        logger.debug("{} not found; TensorRT EP skipped", NVINFER)
         return False
     return True
 

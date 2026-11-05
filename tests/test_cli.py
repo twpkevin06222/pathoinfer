@@ -51,11 +51,11 @@ def test_card_create_prefills_from_the_legacy_pathotrain_key(tmp_path: Path) -> 
 
 
 def test_card_create_reports_missing_fields_and_writes_nothing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     out = tmp_path / "wrapped"
     assert main(["card", "create", str(FIXTURES / "tiny_seg" / "model.onnx"), str(out)]) == 1
-    assert "task" in capsys.readouterr().err
+    assert "task" in caplog.text
     assert not out.exists()
 
 
@@ -66,11 +66,11 @@ def test_card_create_refuses_a_non_empty_folder(tmp_path: Path) -> None:
 
 
 def test_card_validate_fails_on_a_graph_mismatch(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     shutil.copytree(FIXTURES / "tiny_seg", tmp_path / "m")
     card = json.loads((tmp_path / "m" / "model_card.json").read_text())
     card["input"]["name"] = "pixels"
     (tmp_path / "m" / "model_card.json").write_text(json.dumps(card))
     assert main(["card", "validate", str(tmp_path / "m")]) == 1
-    assert "'pixels' is not a graph input" in capsys.readouterr().err
+    assert "'pixels' is not a graph input" in caplog.text
