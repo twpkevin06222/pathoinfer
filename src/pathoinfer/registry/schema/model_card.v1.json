@@ -1,113 +1,407 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ModelCard",
   "$defs": {
     "ClassInfo": {
       "additionalProperties": false,
-      "description": "One class: its output index (channel or label), name and optional display colour.",
+      "description": "One class. ``id`` is its output channel (segmentation, classification) or label\n(detection); ``color`` is its display colour.",
       "properties": {
-        "index": {
+        "id": {
           "minimum": 0,
-          "title": "Index",
+          "title": "Id",
           "type": "integer"
         },
         "name": {
+          "minLength": 1,
           "title": "Name",
           "type": "string"
         },
         "color": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "title": "Color",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "color"
+      ],
+      "title": "ClassInfo",
+      "type": "object"
+    },
+    "ClassificationCard": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "framework": {
+          "enum": [
+            "onnx",
+            "torch",
+            "tensorrt",
+            "safetensors"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "file": {
+          "description": "Model file, relative to the model folder.",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "precision": {
+          "default": "fp32",
+          "enum": [
+            "fp32",
+            "fp16",
+            "bf16",
+            "int8",
+            "fp8"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/InputSpec"
+        },
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/ClassInfo"
+          },
+          "minItems": 1,
+          "title": "Classes",
+          "type": "array"
+        },
+        "recommended_overlap": {
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Recommended Overlap",
+          "type": "number"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": {
+            "training_run_id": null,
+            "calibration_set_hash": null,
+            "parent_model": null,
+            "source_metadata": {}
+          }
+        },
+        "task": {
+          "const": "classification",
+          "title": "Task",
+          "type": "string"
+        },
+        "background_id": {
           "anyOf": [
             {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "maximum": 255,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "maximum": 255,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "maximum": 255,
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              ],
-              "type": "array"
+              "type": "integer"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Color"
-        }
-      },
-      "required": [
-        "index",
-        "name"
-      ],
-      "title": "ClassInfo",
-      "type": "object"
-    },
-    "OutputSpec": {
-      "additionalProperties": false,
-      "description": "One model output. ``shape`` uses names for dynamic axes, e.g. ``[\"batch\", 300, 4]``.",
-      "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
+          "description": "Class id of tiles that are not a finding (e.g. normal); null if none.",
+          "title": "Background Id"
         },
-        "shape": {
-          "items": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "string"
-              }
-            ]
-          },
-          "title": "Shape",
-          "type": "array"
-        },
-        "dtype": {
-          "enum": [
-            "float32",
-            "float16",
-            "int64",
-            "int32"
-          ],
-          "title": "Dtype",
-          "type": "string"
-        },
-        "kind": {
-          "enum": [
-            "logits",
-            "probabilities",
-            "boxes_xyxy",
-            "scores",
-            "labels"
-          ],
-          "title": "Kind",
-          "type": "string"
+        "output": {
+          "$ref": "#/$defs/ClassificationOutput"
         }
       },
       "required": [
         "name",
-        "shape",
-        "dtype",
-        "kind"
+        "version",
+        "framework",
+        "file",
+        "input",
+        "classes",
+        "recommended_overlap",
+        "task",
+        "background_id",
+        "output"
       ],
-      "title": "OutputSpec",
+      "title": "ClassificationCard",
       "type": "object"
     },
-    "Preprocessing": {
+    "ClassificationOutput": {
       "additionalProperties": false,
-      "description": "Tiles are RGB uint8, read at ``tile_mpp`` (ICC to sRGB when ``icc``), then fed as\nfloat32 NCHW: ``x / 255``, then ``(x - mean) / std`` per channel.",
+      "description": "One ``(batch, n_classes)`` tensor per tile; column ``i`` is class id ``i``.",
+      "properties": {
+        "tensor": {
+          "default": "logits",
+          "title": "Tensor",
+          "type": "string"
+        },
+        "activation": {
+          "enum": [
+            "logits",
+            "probs"
+          ],
+          "title": "Activation",
+          "type": "string"
+        },
+        "n_classes": {
+          "exclusiveMinimum": 0,
+          "title": "N Classes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "activation",
+        "n_classes"
+      ],
+      "title": "ClassificationOutput",
+      "type": "object"
+    },
+    "DetectionCard": {
+      "additionalProperties": false,
+      "description": "Every detection label is a foreground class, so there is no background id.",
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "framework": {
+          "enum": [
+            "onnx",
+            "torch",
+            "tensorrt",
+            "safetensors"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "file": {
+          "description": "Model file, relative to the model folder.",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "precision": {
+          "default": "fp32",
+          "enum": [
+            "fp32",
+            "fp16",
+            "bf16",
+            "int8",
+            "fp8"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/InputSpec"
+        },
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/ClassInfo"
+          },
+          "minItems": 1,
+          "title": "Classes",
+          "type": "array"
+        },
+        "recommended_overlap": {
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Recommended Overlap",
+          "type": "number"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": {
+            "training_run_id": null,
+            "calibration_set_hash": null,
+            "parent_model": null,
+            "source_metadata": {}
+          }
+        },
+        "task": {
+          "const": "detection",
+          "title": "Task",
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/DetectionOutput"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "framework",
+        "file",
+        "input",
+        "classes",
+        "recommended_overlap",
+        "task",
+        "output"
+      ],
+      "title": "DetectionCard",
+      "type": "object"
+    },
+    "DetectionOutput": {
+      "additionalProperties": false,
+      "description": "Three tensors, one row per detection: boxes ``(batch, n, 4)``, scores ``(batch, n)``\nand labels ``(batch, n)`` holding class ids.",
+      "properties": {
+        "boxes": {
+          "default": "boxes",
+          "title": "Boxes",
+          "type": "string"
+        },
+        "scores": {
+          "default": "scores",
+          "title": "Scores",
+          "type": "string"
+        },
+        "labels": {
+          "default": "labels",
+          "title": "Labels",
+          "type": "string"
+        },
+        "box_format": {
+          "enum": [
+            "xyxy",
+            "cxcywh"
+          ],
+          "title": "Box Format",
+          "type": "string"
+        },
+        "box_units": {
+          "enum": [
+            "pixel",
+            "normalised"
+          ],
+          "title": "Box Units",
+          "type": "string"
+        },
+        "score_threshold": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Score Threshold",
+          "type": "number"
+        }
+      },
+      "required": [
+        "box_format",
+        "box_units",
+        "score_threshold"
+      ],
+      "title": "DetectionOutput",
+      "type": "object"
+    },
+    "InputSpec": {
+      "additionalProperties": false,
+      "description": "The tile the model takes: ``tile_size`` px square, read at ``mpp``.",
+      "properties": {
+        "name": {
+          "default": "image",
+          "title": "Name",
+          "type": "string"
+        },
+        "tile_size": {
+          "exclusiveMinimum": 0,
+          "title": "Tile Size",
+          "type": "integer"
+        },
+        "mpp": {
+          "exclusiveMinimum": 0,
+          "title": "Mpp",
+          "type": "number"
+        },
+        "channel_order": {
+          "default": "RGB",
+          "enum": [
+            "RGB",
+            "BGR"
+          ],
+          "title": "Channel Order",
+          "type": "string"
+        },
+        "layout": {
+          "default": "NCHW",
+          "enum": [
+            "NCHW",
+            "NHWC"
+          ],
+          "title": "Layout",
+          "type": "string"
+        },
+        "dtype": {
+          "default": "float32",
+          "enum": [
+            "float32",
+            "float16",
+            "uint8"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "normalisation": {
+          "$ref": "#/$defs/Normalisation"
+        },
+        "icc": {
+          "default": true,
+          "description": "Convert the slide's ICC profile to sRGB first.",
+          "title": "Icc",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tile_size",
+        "mpp",
+        "normalisation"
+      ],
+      "title": "InputSpec",
+      "type": "object"
+    },
+    "Normalisation": {
+      "additionalProperties": false,
+      "description": "Per channel, in ``channel_order``: ``(pixel * scale - mean) / std``.",
       "properties": {
         "mean": {
           "maxItems": 3,
@@ -131,137 +425,243 @@
           "minItems": 3,
           "prefixItems": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             }
           ],
           "title": "Std",
           "type": "array"
         },
-        "icc": {
-          "default": true,
-          "title": "Icc",
-          "type": "boolean"
+        "scale": {
+          "default": 0.00392156862745098,
+          "exclusiveMinimum": 0,
+          "title": "Scale",
+          "type": "number"
         }
       },
       "required": [
         "mean",
         "std"
       ],
-      "title": "Preprocessing",
+      "title": "Normalisation",
       "type": "object"
-    }
-  },
-  "additionalProperties": false,
-  "description": "A model folder's ``model_card.json``; ``file`` is relative to that folder.",
-  "properties": {
-    "schema_version": {
-      "const": 1,
-      "default": 1,
-      "title": "Schema Version",
-      "type": "integer"
     },
-    "name": {
-      "title": "Name",
-      "type": "string"
-    },
-    "version": {
-      "title": "Version",
-      "type": "string"
-    },
-    "task": {
-      "enum": [
-        "segmentation",
-        "detection",
-        "heatmap"
-      ],
-      "title": "Task",
-      "type": "string"
-    },
-    "architecture": {
-      "anyOf": [
-        {
-          "type": "string"
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "training_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Training Run Id"
         },
-        {
-          "type": "null"
+        "calibration_set_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibration Set Hash"
+        },
+        "parent_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "name@version of the model this one was converted from.",
+          "title": "Parent Model"
+        },
+        "source_metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Producer metadata kept as is, e.g. a legacy 'pathotrain' ONNX key.",
+          "title": "Source Metadata",
+          "type": "object"
         }
-      ],
-      "default": null,
-      "title": "Architecture"
-    },
-    "format": {
-      "enum": [
-        "onnx",
-        "torchscript",
-        "torch_export",
-        "tensorrt_plan"
-      ],
-      "title": "Format",
-      "type": "string"
-    },
-    "file": {
-      "title": "File",
-      "type": "string"
-    },
-    "input_name": {
-      "default": "image",
-      "title": "Input Name",
-      "type": "string"
-    },
-    "tile_size": {
-      "exclusiveMinimum": 0,
-      "title": "Tile Size",
-      "type": "integer"
-    },
-    "tile_mpp": {
-      "exclusiveMinimum": 0,
-      "title": "Tile Mpp",
-      "type": "number"
-    },
-    "preprocessing": {
-      "$ref": "#/$defs/Preprocessing"
-    },
-    "classes": {
-      "items": {
-        "$ref": "#/$defs/ClassInfo"
       },
-      "minItems": 1,
-      "title": "Classes",
-      "type": "array"
-    },
-    "outputs": {
-      "items": {
-        "$ref": "#/$defs/OutputSpec"
-      },
-      "minItems": 1,
-      "title": "Outputs",
-      "type": "array"
-    },
-    "provenance": {
-      "additionalProperties": true,
-      "default": {},
       "title": "Provenance",
       "type": "object"
+    },
+    "SegmentationCard": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "framework": {
+          "enum": [
+            "onnx",
+            "torch",
+            "tensorrt",
+            "safetensors"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "file": {
+          "description": "Model file, relative to the model folder.",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "precision": {
+          "default": "fp32",
+          "enum": [
+            "fp32",
+            "fp16",
+            "bf16",
+            "int8",
+            "fp8"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/InputSpec"
+        },
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/ClassInfo"
+          },
+          "minItems": 1,
+          "title": "Classes",
+          "type": "array"
+        },
+        "recommended_overlap": {
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Recommended Overlap",
+          "type": "number"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": {
+            "training_run_id": null,
+            "calibration_set_hash": null,
+            "parent_model": null,
+            "source_metadata": {}
+          }
+        },
+        "task": {
+          "const": "segmentation",
+          "title": "Task",
+          "type": "string"
+        },
+        "background_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Class id of background, never written as an annotation; null if none.",
+          "title": "Background Id"
+        },
+        "output": {
+          "$ref": "#/$defs/SegmentationOutput"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "framework",
+        "file",
+        "input",
+        "classes",
+        "recommended_overlap",
+        "task",
+        "background_id",
+        "output"
+      ],
+      "title": "SegmentationCard",
+      "type": "object"
+    },
+    "SegmentationOutput": {
+      "additionalProperties": false,
+      "description": "One ``(batch, n_classes, H, W)`` tensor; channel ``i`` is class id ``i``.",
+      "properties": {
+        "tensor": {
+          "default": "logits",
+          "title": "Tensor",
+          "type": "string"
+        },
+        "activation": {
+          "enum": [
+            "logits",
+            "probs"
+          ],
+          "title": "Activation",
+          "type": "string"
+        },
+        "n_classes": {
+          "exclusiveMinimum": 0,
+          "title": "N Classes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "activation",
+        "n_classes"
+      ],
+      "title": "SegmentationOutput",
+      "type": "object"
     }
   },
-  "required": [
-    "name",
-    "version",
-    "task",
-    "format",
-    "file",
-    "tile_size",
-    "tile_mpp",
-    "preprocessing",
-    "classes",
-    "outputs"
-  ],
-  "title": "ModelCard",
-  "type": "object"
+  "discriminator": {
+    "mapping": {
+      "classification": "#/$defs/ClassificationCard",
+      "detection": "#/$defs/DetectionCard",
+      "segmentation": "#/$defs/SegmentationCard"
+    },
+    "propertyName": "task"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SegmentationCard"
+    },
+    {
+      "$ref": "#/$defs/DetectionCard"
+    },
+    {
+      "$ref": "#/$defs/ClassificationCard"
+    }
+  ]
 }

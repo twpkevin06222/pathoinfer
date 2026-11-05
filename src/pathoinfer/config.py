@@ -16,14 +16,15 @@ class _Strict(BaseModel):
 class PatchologyInput(_Strict):
     """How patchology opens, masks and tiles a slide.
 
-    Tile size and mpp come from the model. There is deliberately no
+    Tile size and mpp come from the model. ``tile_overlap`` None uses the model card's
+    ``recommended_overlap``. There is deliberately no
     ``slide_mpp`` override: a slide without a resolution in its metadata is
     refused by patchology, never inferred on.
     """
 
     backend: Backend = "openslide"
     icc: bool = True
-    tile_overlap: float = Field(0.0, ge=0, lt=1)
+    tile_overlap: float | None = Field(None, ge=0, lt=1)
     tissue_overlap: float = Field(0.1, ge=0, le=1)
     tissue: TissueConfig = TissueConfig()
     artifacts: ArtifactConfig = ArtifactConfig()

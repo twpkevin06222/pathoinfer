@@ -28,6 +28,7 @@ class Runtime(Protocol):
         ...
 
 
-def preprocess(batch: NDArray[np.uint8], card: ModelCard) -> NDArray[np.float32]:
-    """(N, H, W, 3) uint8 -> (N, 3, H, W) float32: ``x / 255``, then ``(x - mean) / std``."""
+def preprocess(batch: NDArray[np.uint8], card: ModelCard) -> NDArray[np.generic]:
+    """(N, H, W, 3) RGB uint8 -> the card's input: channel order, ``(x * scale - mean) / std``,
+    layout and dtype from ``card.input``."""
     raise NotImplementedError("lands in v0.1")
