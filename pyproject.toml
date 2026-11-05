@@ -54,7 +54,8 @@ dev = [
 ]
 
 [tool.ruff]
-extend = "../../pyproject.toml"
+line-length = 100
+target-version = "py312"
 
 [tool.ruff.lint]
 extend-select = ["B", "I", "LOG", "T20", "TID", "UP"]
@@ -68,6 +69,9 @@ extend-select = ["B", "I", "LOG", "T20", "TID", "UP"]
 "osgeo".msg = "No GDAL: vectorise with OpenCV and shapely."
 "openslide".msg = "Read slides through patchology (patchology.open_slide), never openslide directly."
 "vllm".msg = "Never import vllm: talk to a vLLM server over HTTP (runtime/remote/vllm.py)."
+
+[tool.ruff.lint.isort]
+known-first-party = ["patchology", "pathoinfer"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/pathoinfer/io/geodataframe.py" = ["TID251"]  # the one geopandas interop helper
