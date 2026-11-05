@@ -1,13 +1,13 @@
-# heatmap inference settings; load with pathoinfer.config.load_config.
-task: heatmap
-model: models/heatmap.onnx        # example; an .onnx file or models:/NAME/<version>
+# classification inference settings; load with pathoinfer.config.load_config.
+task: classification
+model: models/classification               # example; a model folder, models:/NAME@ALIAS or hf://ORG/REPO
 
 # Passed to patchology. Tile size and mpp come from the model; slides that do not
 # report their resolution are refused.
 patchology:
   backend: openslide              # or fastslide
   icc: true                       # ICC profile -> sRGB; pathotrain trains with it on
-  tile_overlap: 0.0               # one score per tile; overlap only adds resolution
+  tile_overlap: null              # null: the model card's recommended_overlap
   tissue_overlap: 0.1             # keep tiles with at least this fraction of tissue
   tissue: {method: triangle}      # patchology TissueConfig fields
   artifacts: {pen: true, blur: false}  # patchology ArtifactConfig fields

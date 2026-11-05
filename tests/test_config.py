@@ -8,7 +8,7 @@ from pathoinfer.config import InferenceConfig, load_config
 CONFIGS = Path(__file__).parents[1] / "configs"
 
 
-@pytest.mark.parametrize("task", ["segmentation", "detection", "heatmap"])
+@pytest.mark.parametrize("task", ["segmentation", "detection", "classification"])
 def test_example_config_loads(task: str) -> None:
     cfg = load_config(CONFIGS / f"{task}.yaml")
     assert cfg.task == task
