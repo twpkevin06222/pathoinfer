@@ -1,0 +1,6 @@
+# Tile classification. Validates today; `pathoinfer run` supports it from v0.2.
+task: classification
+model: models/classification
+slides: slides/*.svs
+outputs:
+  dir: outputs/classification

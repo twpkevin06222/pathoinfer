@@ -11,6 +11,14 @@ tiny_seg_card.onnx    the graph with the card embedded under ``model_card``
 tiny_seg_fp16/        the graph in float16, card with float16 input and fp16 precision
 tiny_seg_torch/       TorchScript (model.pt)
 tiny_seg_export/      torch.export (model.pt2)
+
+Plus a detector, ``tiny_det/`` (torch.export): every tile gets one box at its centre
+(score 0.9) and one in its corner (score 0.1, below the card's threshold), labelled 1
+where the tile is redder than it is blue. So each tile owns exactly one detection.
+
+And ``tiny_dark/`` (torch.export, 64 px tiles): class 1 wherever a pixel is darker than
+glass (mean RGB below 0.85), so its polygons trace tissue edges exactly; alignment and
+area checks compare them with the shapes drawn on the synthetic slide.
 """
 
 import json
@@ -101,6 +109,58 @@ def main() -> None:
         "model.pt2",
         lambda p: torch.export.save(program, p),
     )
+    detector()
+    dark()
+
+
+class TinyDet(torch.nn.Module):
+    def forward(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
+        b, c = image.shape[0], SIZE / 2
+        boxes = torch.tensor([[c - 4, c - 4, c + 4, c + 4], [0.0, 0.0, 4.0, 4.0]])
+        labels = (image[:, 0].mean((1, 2)) > image[:, 2].mean((1, 2))).long()
+        return {
+            "boxes": boxes.expand(b, 2, 4),
+            "scores": torch.tensor([0.9, 0.1]).expand(b, 2),
+            "labels": labels[:, None].expand(b, 2),
+        }
+
+
+def detector() -> None:
+    card = json.loads((HERE / "tiny_seg" / "model_card.json").read_text())
+    card = {k: v for k, v in card.items() if k not in ("background_id", "output")} | {
+        "name": "tiny-det",
+        "task": "detection",
+        "framework": "torch",
+        "file": "model.pt2",
+        "classes": [
+            {"id": 0, "name": "lymphocyte", "color": [0, 0, 255]},
+            {"id": 1, "name": "tumour", "color": [255, 0, 0]},
+        ],
+        "output": {"box_format": "xyxy", "box_units": "pixel", "score_threshold": 0.5},
+    }
+    batch = torch.export.Dim("batch")
+    example = torch.zeros(2, 3, SIZE, SIZE)
+    program = torch.export.export(TinyDet(), (example,), dynamic_shapes=({0: batch},))
+    write_folder("tiny_det", card, "model.pt2", lambda p: torch.export.save(program, p))
+
+
+class TinyDark(torch.nn.Module):
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
+        darker = 40 * (0.85 - image.mean(1, keepdim=True))
+        return torch.cat([-darker, darker], 1)
+
+
+def dark() -> None:
+    card = json.loads((HERE / "tiny_seg" / "model_card.json").read_text())
+    card |= {"name": "tiny-dark", "framework": "torch", "file": "model.pt2"}
+    card["input"] |= {
+        "tile_size": 64,
+        "normalisation": {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]},
+    }
+    batch = torch.export.Dim("batch")
+    example = torch.zeros(2, 3, 64, 64)
+    program = torch.export.export(TinyDark(), (example,), dynamic_shapes=({0: batch},))
+    write_folder("tiny_dark", card, "model.pt2", lambda p: torch.export.save(program, p))
 
 
 def write_folder(name: str, card: dict, file: str, save) -> None:  # type: ignore[no-untyped-def]

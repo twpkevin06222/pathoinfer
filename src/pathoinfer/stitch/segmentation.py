@@ -23,8 +23,16 @@ ring is widened by half a pixel (mitred) so polygons follow pixel edges. Polygon
 reach a band boundary are merged with the polygons they touch in the neighbouring band
 (STRtree + unary_union) once every band is done.
 
+Clean-up, per merged region (whole regions, so band boundaries never matter): holes
+under ``fill_holes_um2`` are filled unless another class's region lies inside them, and
+same-class islands inside a filled hole are dropped; regions under ``min_area_um2`` are
+dropped before any further work.
+
 Post-processing, per polygon: simplify (``simplify_px`` output pixels, topology kept),
-make valid, keep polygonal parts, drop regions under ``min_area_um2``, scale to level 0
+which turns pixel staircases into diagonal runs; smooth with ``smooth`` rounds of
+Chaikin corner cutting (each round replaces every vertex with points 1/4 and 3/4 along
+its two edges, doubling the vertices and converging to a quadratic B-spline, so outlines
+are curves rather than pixel steps); make valid, keep polygonal parts, drop regions under ``min_area_um2``, scale to level 0
 and round to 0.1 px. Measurements: ``area_um2``, ``perimeter_um`` and ``mean_probability``
 (the blended probability of the polygon's class over its pixels).
 """
@@ -84,7 +92,9 @@ class SegmentationStitcher:
         *,
         output_mpp: float = 2.0,
         simplify_px: float = 1.5,
+        smooth: int = 2,
         min_area_um2: float = 0.0,
+        fill_holes_um2: float = 0.0,
         band_height: int | None = None,
         keep_labels: bool = False,
     ) -> None:
@@ -92,6 +102,9 @@ class SegmentationStitcher:
             raise ValueError(f"output_mpp {output_mpp} is finer than the model's {grid.mpp}")
         self.card, self.grid = card, grid
         self.simplify_px, self.min_area_um2 = simplify_px, min_area_um2
+        self.smooth = smooth
+        px_um2 = output_mpp**2
+        self.fill_holes_px, self.min_area_px = fill_holes_um2 / px_um2, min_area_um2 / px_um2
         self.scale = output_mpp / grid.mpp
         self.level0_per_px = output_mpp / grid.slide_mpp
         width, height = grid.slide_dimensions
@@ -128,7 +141,8 @@ class SegmentationStitcher:
             )
             for band in sorted(self._bands):
                 self._finish_band(band)
-        pieces = self._done + _merge(self._seams)
+        pieces = _fill_holes(self._done + _merge(self._seams), self.fill_holes_px)
+        pieces = [p for p in pieces if p.geometry.area >= self.min_area_px]
         features = [f for p in pieces if (f := self._feature(p)) is not None]
         logger.info(
             "segmentation: {} polygons; peak canvas {:.1f} MiB (bands of {} x {} px at {:.3g} mpp)",
@@ -205,7 +219,7 @@ class SegmentationStitcher:
         # between near-tied points; drop them so it simplifies from the true corners.
         geometry = shapely.simplify(piece.geometry, 0)
         geometry = shapely.simplify(geometry, self.simplify_px, preserve_topology=True)
-        geometry = _polygonal(shapely.make_valid(geometry))
+        geometry = _polygonal(shapely.make_valid(_chaikin(geometry, self.smooth)))
         if geometry is None:
             return None
         mpp = self.grid.slide_mpp
@@ -243,11 +257,15 @@ def _regions(
     for i, outer in enumerate(contours):
         if links[i][3] != -1:
             continue
-        geometry = _filled(outer, top)
+        holes = []
         child = links[i][2]
         while child != -1:
-            geometry = geometry.difference(_hole(contours[child], top))
+            holes.append(_hole(contours[child], top))
             child = links[child][0]
+        # One difference with all holes: one at a time is quadratic in the hole count.
+        geometry = _filled(outer, top)
+        if holes:
+            geometry = geometry.difference(shapely.union_all(holes))
         x, y = outer[0, 0]
         component = components[y, x]
         pieces.append(_Piece(geometry, class_id, float(sums[component]), int(sizes[component])))
@@ -317,6 +335,59 @@ def _connected(n: int, pairs: Iterable[tuple[int, int]]) -> list[list[int]]:
     for i in range(n):
         groups.setdefault(root(i), []).append(i)
     return list(groups.values())
+
+
+def _fill_holes(pieces: list[_Piece], max_px: float) -> list[_Piece]:
+    """Fill holes smaller than ``max_px`` output px² that hold no other class's region,
+    and drop the same-class islands inside them."""
+    if max_px <= 0 or not pieces:
+        return pieces
+    geometries = [p.geometry for p in pieces]
+    tree = shapely.STRtree(geometries)
+    dropped: set[int] = set()
+    filled: dict[int, Any] = {}
+    for i, piece in enumerate(pieces):
+        polygons = list(getattr(piece.geometry, "geoms", [piece.geometry]))
+        holes = [Polygon(ring) for poly in polygons for ring in poly.interiors]
+        small = [h for h in holes if h.area < max_px]
+        if not small:
+            continue
+        hole_ids, inside = tree.query(small, predicate="contains")
+        blocked = {
+            h for h, j in zip(hole_ids, inside, strict=True) if pieces[j].class_id != piece.class_id
+        }
+        fill = [small[h] for h in range(len(small)) if h not in blocked]
+        if not fill:
+            continue
+        dropped |= {int(j) for h, j in zip(hole_ids, inside, strict=True) if h not in blocked}
+        filled[i] = shapely.union_all([piece.geometry, *fill])
+    return [
+        _Piece(filled.get(i, p.geometry), p.class_id, p.prob_sum, p.pixels)
+        for i, p in enumerate(pieces)
+        if i not in dropped
+    ]
+
+
+def _chaikin(geometry: Any, rounds: int) -> Any:
+    """``rounds`` of Chaikin corner cutting on every ring of a (Multi)Polygon."""
+    if rounds == 0:
+        return geometry
+
+    def cut(ring: Any) -> NDArray[np.float64]:
+        points = np.asarray(ring.coords)[:-1]
+        for _ in range(rounds):
+            following = np.roll(points, -1, axis=0)
+            points = np.stack(
+                [0.75 * points + 0.25 * following, 0.25 * points + 0.75 * following], axis=1
+            ).reshape(-1, 2)
+        return points
+
+    polygons = [
+        Polygon(cut(p.exterior), [cut(h) for h in p.interiors])
+        for p in getattr(geometry, "geoms", [geometry])
+        if not p.is_empty
+    ]
+    return polygons[0] if len(polygons) == 1 else shapely.MultiPolygon(polygons)
 
 
 def _polygonal(geometry: Any) -> Any:

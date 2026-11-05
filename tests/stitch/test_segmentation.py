@@ -203,3 +203,64 @@ def test_stitch_thread_reraises_stitcher_errors() -> None:
             for _ in range(10):
                 thread.put([], {})
             thread.finalize()
+
+
+def holes(result: StitchResult) -> list[int]:
+    return sorted(len(f.geometry.interiors) for f in result.features)
+
+
+def test_holes_under_the_threshold_are_filled_and_larger_ones_kept() -> None:
+    # Hole areas: r 20 -> 79 um2, r 150 -> 4418 um2 (level-0 px at 0.25 mpp).
+    small, large = annulus(20, 300), annulus(150, 300)
+    shape = lambda x, y: small(x - 900, y) | large(x + 900, y)
+    assert holes(stitch(shape)) == [1, 1]
+    filled = stitch(shape, fill_holes_um2=500)
+    assert holes(filled) == [0, 1]
+    unfilled = {round(f.measurements["area_um2"]) for f in stitch(shape).features}
+    grown = {round(f.measurements["area_um2"]) for f in filled.features}
+    assert len(unfilled & grown) == 1  # the large-hole region is unchanged
+
+
+def test_islands_inside_a_filled_hole_are_dropped() -> None:
+    ring, island = annulus(40, 300), disk(10)
+    bullseye = lambda x, y: ring(x, y) | island(x, y)
+    assert len(stitch(bullseye).features) == 2
+    (filled,) = stitch(bullseye, fill_holes_um2=1000).features
+    assert len(filled.geometry.interiors) == 0
+    assert filled.geometry.area == pytest.approx(math.pi * 300**2, rel=0.02)
+
+
+def test_a_hole_holding_another_class_is_kept() -> None:
+    data = CARD | {
+        "input": CARD["input"] | {"tile_size": TILE, "mpp": MODEL_MPP},
+        "classes": [*CARD["classes"], {"id": 2, "name": "necrosis", "color": [0, 0, 200]}],
+        "output": CARD["output"] | {"n_classes": 3},
+    }
+    three = parse_card(data)
+    assert isinstance(three, SegmentationCard)
+    ring, core = annulus(40, 300), disk(25)
+    stitcher = SegmentationStitcher(three, grid(), output_mpp=OUTPUT_MPP, fill_holes_um2=1000)
+    centres = (np.arange(TILE) + 0.5) * DOWNSAMPLE
+    specs = list(grid().tiles)
+    for start in range(0, len(specs), 16):
+        chunk = specs[start : start + 16]
+        out = np.full((len(chunk), 3, TILE, TILE), -8.0, np.float32)
+        for i, s in enumerate(chunk):
+            x = s.xm * DOWNSAMPLE + centres[None, :]
+            y = s.ym * DOWNSAMPLE + centres[:, None]
+            label = np.where(core(x, y), 2, np.where(ring(x, y), 1, 0))
+            np.put_along_axis(out[i], label[None], 8.0, axis=0)
+        stitcher.add(chunk, {"logits": torch.from_numpy(out)})
+    features = stitcher.finalize().features
+    by_class = {f.class_name: f for f in features}
+    assert set(by_class) == {"tumor", "necrosis"}
+    assert len(by_class["tumor"].geometry.interiors) == 1
+    assert not by_class["tumor"].geometry.overlaps(by_class["necrosis"].geometry)
+
+
+def test_small_objects_are_removed() -> None:
+    big, speck = disk(300), disk(12)  # speck: ~28 um2
+    shape = lambda x, y: big(x, y) | speck(x + 900, y)
+    assert len(stitch(shape).features) == 2
+    (kept,) = stitch(shape, min_area_um2=100).features
+    assert kept.measurements["area_um2"] > 1000

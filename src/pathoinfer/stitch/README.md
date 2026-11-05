@@ -45,8 +45,10 @@ for feature in result.features:
 | Option | Default | Meaning |
 |---|---|---|
 | `output_mpp` | `2.0` | Resolution the probabilities are blended and polygonised at; never finer than the model's mpp |
-| `simplify_px` | `1.5` | Douglas-Peucker tolerance in output pixels (topology kept) |
-| `min_area_um2` | `0.0` | Drop polygons smaller than this |
+| `simplify_px` | `1.5` | Douglas-Peucker tolerance in output pixels (topology kept); turns pixel staircases into diagonal runs |
+| `smooth` | `2` | Rounds of Chaikin corner cutting after simplifying: each replaces every vertex with points 1/4 and 3/4 along its edges, doubling the vertices, so outlines are curves rather than pixel steps. `0` keeps outlines on pixel edges |
+| `min_area_um2` | `0.0` | Remove small objects: drop regions smaller than this, checked on the merged region (before simplifying, so specks cost nothing more) and again on the final polygon |
+| `fill_holes_um2` | `0.0` | Fill holes smaller than this. A hole that holds another class's region is kept, so classes never overlap; same-class islands inside a filled hole are dropped. `.inf` in YAML fills every hole |
 | `band_height` | `2 * tile` | Rows per band, in output pixels |
 | `keep_labels` | `False` | Also return the slide's label map as `rasters["labels"]` (-1 where no tile reached) |
 
@@ -68,7 +70,9 @@ How it works (the module docstring has the maths):
 4. **Merge seams.** Polygons that reach a band boundary are kept aside and, once every
    band is done, unioned with the same-class polygons they touch (STRtree query, then
    `unary_union` of each touching group).
-5. **Clean up.** Drop collinear vertices, simplify, make valid, keep polygonal parts, drop
+5. **Fill holes, remove small objects.** On whole merged regions (after the seam merge,
+   so band boundaries never split a hole or an object), as the two options say.
+6. **Clean up.** Drop collinear vertices, simplify, smooth (Chaikin), make valid, keep polygonal parts, drop
    regions under `min_area_um2`, scale to level 0 and round to 0.1 px.
 
 Measurements per feature: `area_um2`, `perimeter_um` and `mean_probability` (the blended
