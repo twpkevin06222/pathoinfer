@@ -1,0 +1,42 @@
+# Segmentation run: validate with `pathoinfer validate`, run with `pathoinfer run`.
+# Relative paths are relative to the working directory.
+task: segmentation
+model: models/segmentation        # model folder, ONNX file, models:/NAME@ALIAS or hf://ORG/REPO
+slides: slides/*.svs              # a path, a glob, a list file (.txt, .csv/.parquet with a
+                                  # `path` column) or a YAML list of any of these
+resume: true                      # skip slides finished with the same settings
+
+# Tile size and mpp come from the model; slides without a resolution are refused.
+tiling:
+  backend: openslide              # or fastslide
+  icc: true                       # ICC profile -> sRGB, when the model card also asks for it
+  overlap: null                   # fraction of a tile; null: the card's recommended_overlap
+  min_tissue_fraction: 0.0        # keep tiles with any tissue, and at least this fraction
+  tissue: {method: triangle}      # patchology TissueConfig fields
+  artifacts: {pen: true, blur: false}  # patchology ArtifactConfig fields
+
+runtime:
+  device: auto                    # cuda when available, else cpu; or cpu, cuda, cuda:1
+  batch_size: 32                  # fixed; the last batch is padded
+  tensorrt: true                  # ONNX models use the TensorRT EP when it loads
+  autocast: null                  # PyTorch models only: bf16 or fp16
+
+loader:
+  num_workers: 4                  # reader processes; 0 reads in the main process
+  prefetch_factor: 2              # batches queued per reader
+
+segmentation:
+  output_mpp: null                # polygonise at this mpp; null: 2.0, or the model's if coarser
+  simplify_px: 1.5                # Douglas-Peucker tolerance, output pixels
+  min_area_um2: 50                # drop smaller regions
+
+outputs:
+  dir: outputs/segmentation
+  geojson: true                   # <slide>.geojson[.gz], for QuPath
+  gzip: true
+  per_class: false                # one GeoJSON per class
+  parquet: true                   # <slide>.objects.parquet and <slide>.summary.parquet
+  geoparquet: false               # GeoParquet metadata via DuckDB spatial (docs/outputs.md)
+  tiff: true                      # <slide>.labels.tiff, the label map as a pyramidal TIFF
+
+class_colors: {}                  # e.g. {tumor: [255, 0, 0]}; default: the card's colours

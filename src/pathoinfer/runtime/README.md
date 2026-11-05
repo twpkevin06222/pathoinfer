@@ -28,7 +28,7 @@ tiles = torch.zeros((50, card.input.tile_size, card.input.tile_size, 3), dtype=t
 outputs = runtime.predict(tiles)  # {"logits": (50, n_classes, H, W)}
 ```
 
-`RuntimeConfig` is the `runtime:` section of a run config (`configs/*.yaml`):
+`RuntimeConfig` is the `runtime:` section of a run config (`examples/*.yaml`):
 
 | Field | Default | Meaning |
 |---|---|---|

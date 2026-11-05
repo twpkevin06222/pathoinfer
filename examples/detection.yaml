@@ -1,0 +1,41 @@
+# Detection run: validate with `pathoinfer validate`, run with `pathoinfer run`.
+# Relative paths are relative to the working directory.
+task: detection
+model: models/detection           # model folder, ONNX file, models:/NAME@ALIAS or hf://ORG/REPO
+slides: slides.csv                # a path, a glob, a list file (.txt, .csv/.parquet with a
+                                  # `path` column) or a YAML list of any of these
+resume: true                      # skip slides finished with the same settings
+
+# Tile size and mpp come from the model; slides without a resolution are refused.
+tiling:
+  backend: openslide
+  icc: true
+  overlap: null                   # objects up to about the overlap are reported exactly once
+  min_tissue_fraction: 0.0
+  tissue: {method: triangle}
+  artifacts: {pen: true, blur: false}
+
+runtime:
+  device: auto
+  batch_size: 32
+  tensorrt: true
+  autocast: null
+
+loader:
+  num_workers: 4
+  prefetch_factor: 2
+
+detection:
+  score_threshold: null           # null: the model card's score_threshold
+  nms_iou: null                   # e.g. 0.3: NMS between tiles for objects wider than the overlap
+  geometry: point                 # point (centre) or box (Polygon) in GeoJSON and Parquet
+
+outputs:
+  dir: outputs/detection
+  geojson: true
+  gzip: true
+  per_class: true                 # one GeoJSON per cell type
+  parquet: true
+  geoparquet: false
+
+class_colors: {}

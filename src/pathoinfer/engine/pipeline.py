@@ -1,15 +1,299 @@
-"""Process slides: tiling -> parallel reads -> batching -> runtime -> stitcher thread ->
-writers. Lands in v0.1.
+"""Process slides: tissue and grid -> DataLoader -> runtime -> stitcher thread -> writers.
+
+``run_batch`` loads the model once and runs every slide of a config. A slide that fails
+is logged and recorded; the batch carries on. Each finished slide gets a
+``<stem>.done.json`` marker naming its outputs and the run's settings hash, so a resumed
+run skips it while the settings and outputs are unchanged.
 """
 
+import json
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
-from pathoinfer.config import InferenceConfig
+import polars as pl
+from loguru import logger
+
+from patchology import open_slide
+from pathoinfer._logging import add_file_sink, log_call
+from pathoinfer.config import RunConfig
+from pathoinfer.engine.scheduler import STITCH_QUEUE, Timings, peak_memory_mb, stream
+from pathoinfer.io.objects import ObjectTable, RunInfo
+from pathoinfer.io.writers.geojson import write_geojson
+from pathoinfer.io.writers.parquet import write_parquet, write_summary
+from pathoinfer.io.writers.tiff import write_tiff
+from pathoinfer.registry.loader import load_model
+from pathoinfer.registry.model_card import DetectionCard, ModelCard, SegmentationCard
+from pathoinfer.runtime.base import Runtime
+from pathoinfer.runtime.factory import make_runtime
+from pathoinfer.stitch.base import Stitcher, StitchThread
+from pathoinfer.stitch.detection import DetectionStitcher
+from pathoinfer.stitch.segmentation import SegmentationStitcher
+from pathoinfer.tiling.dataset import make_loader
+from pathoinfer.tiling.grid import SlideGrid, build_grid
+
+Status = Literal["done", "skipped", "failed"]
+# The stages tiles flow through; tiles/s is tiles over their total time.
+STREAM_STAGES = ("start", "read", "infer", "stitch_wait")
 
 
-def run_slide(slide: Path, config: InferenceConfig, out_dir: Path) -> list[Path]:
-    raise NotImplementedError("lands in v0.1")
+@dataclass(frozen=True)
+class Model:
+    """A loaded model, shared by every slide of a run."""
+
+    card: ModelCard
+    model_dir: Path
+    runtime: Runtime
+    settings_hash: str
 
 
-def run_batch(slides: list[Path], config: InferenceConfig, out_dir: Path) -> dict[Path, list[Path]]:
-    raise NotImplementedError("lands in v0.1")
+@dataclass(frozen=True)
+class RunResult:
+    slide: Path
+    status: Status
+    slide_id: str | None = None
+    tiles: int = 0
+    objects: int = 0
+    wall_s: float = 0.0
+    outputs: tuple[Path, ...] = ()
+    timings: dict[str, float] = field(default_factory=dict)
+    peak_memory: dict[str, float] = field(default_factory=dict)
+    error: str | None = None
+
+
+@log_call
+def load(cfg: RunConfig) -> Model:
+    """Load and warm up ``cfg``'s model. Raises ValueError if its task is not the
+    config's."""
+    card, model_dir = load_model(cfg.model)
+    if card.task != cfg.task:
+        raise ValueError(f"config task is {cfg.task}, but {cfg.model} is a {card.task} model")
+    if card.task == "classification":
+        raise NotImplementedError("classification runs land in v0.2")
+    logger.debug("model card: {}", card.model_dump_json())
+    runtime = make_runtime(card, model_dir, cfg.runtime)
+    runtime.warmup()
+    return Model(card, model_dir, runtime, cfg.settings_hash(card.model_dump_json()))
+
+
+def output_paths(cfg: RunConfig, slide: Path) -> dict[str, Path]:
+    """The files a slide's run writes, by kind (GeoJSON split per class adds more)."""
+    out, stem = cfg.outputs, slide.stem
+    paths = {}
+    if out.geojson:
+        paths["geojson"] = out.dir / f"{stem}.geojson{'.gz' if out.gzip else ''}"
+    if out.parquet:
+        paths["objects"] = out.dir / f"{stem}.objects.parquet"
+        paths["summary"] = out.dir / f"{stem}.summary.parquet"
+    if out.tiff and cfg.task == "segmentation":
+        paths["labels"] = out.dir / f"{stem}.labels.tiff"
+    return paths
+
+
+def marker_path(cfg: RunConfig, slide: Path) -> Path:
+    return cfg.outputs.dir / f"{slide.stem}.done.json"
+
+
+def is_done(cfg: RunConfig, slide: Path, settings_hash: str) -> bool:
+    """True if a run with the same settings finished ``slide`` and its outputs exist."""
+    try:
+        marker = json.loads(marker_path(cfg, slide).read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return False
+    return marker.get("settings_hash") == settings_hash and all(
+        Path(p).is_file() for p in marker.get("outputs", [])
+    )
+
+
+@log_call
+def run_slide(cfg: RunConfig, path: Path, model: Model | None = None) -> RunResult:
+    """Run one slide end to end and write its outputs; raises on failure."""
+    model = model or load(cfg)
+    card = model.card
+    start = time.perf_counter()
+    timings = Timings()
+    with timings.stage("grid"), open_slide(path, cfg.tiling.backend) as slide:
+        overlap = cfg.tiling.overlap
+        overlap = card.recommended_overlap if overlap is None else overlap
+        grid = build_grid(
+            slide,
+            card.input.tile_size,
+            card.input.mpp,
+            round(overlap * card.input.tile_size),
+            min_tissue_fraction=cfg.tiling.min_tissue_fraction,
+            tissue=cfg.tiling.tissue,
+            artifacts=cfg.tiling.artifacts,
+            icc=cfg.tiling.icc and card.input.icc,
+        )
+    logger.debug(
+        "{}: {} tiles in a {} x {} grid", path.name, len(grid.tiles), grid.n_rows, grid.n_cols
+    )
+    output_mpp = _output_mpp(cfg, grid) if cfg.task == "segmentation" else None
+    loader = make_loader(
+        grid,
+        cfg.runtime.batch_size,
+        cfg.loader.num_workers,
+        prefetch_factor=cfg.loader.prefetch_factor,
+        persistent_workers=False,
+    )
+    try:
+        thread = StitchThread(_stitcher(cfg, card, grid, output_mpp), STITCH_QUEUE)
+        result, tiles = stream(loader, model.runtime, thread, timings)
+    finally:
+        loader.dataset.close()  # type: ignore[attr-defined]  # TileDataset; open with 0 workers
+
+    run = RunInfo.create(card, grid, cfg.model, output_mpp, cfg.class_colors)
+    objects = ObjectTable.from_result(result, run, cfg.detection.geometry)
+    paths = output_paths(cfg, path)
+    cfg.outputs.dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    with timings.stage("write"):
+        if "geojson" in paths:
+            written += write_geojson(paths["geojson"], objects, run, cfg.outputs.per_class)
+        if "objects" in paths:
+            written.append(write_parquet(paths["objects"], objects, run, cfg.outputs.geoparquet))
+            written.append(write_summary(paths["summary"], objects, run))
+        if "labels" in paths:
+            written.append(write_tiff(paths["labels"], result.rasters["labels"], run))
+    marker = {
+        "settings_hash": model.settings_hash,
+        "slide": str(path),
+        "slide_id": grid.slide_id,
+        "outputs": [str(p) for p in written],
+        "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    marker_path(cfg, path).write_text(json.dumps(marker, indent=2) + "\n")
+
+    wall = time.perf_counter() - start
+    peak = peak_memory_mb()
+    stages = " ".join(f"{k}_s={v:.2f}" for k, v in timings.seconds.items())
+    memory = " ".join(f"peak_{k}={v:.0f}" for k, v in peak.items())
+    logger.info(
+        "slide={} slide_id={} tiles={} tiles_per_s={:.0f} objects={} wall_s={:.1f} {} {}",
+        path.name,
+        grid.slide_id,
+        tiles,
+        tiles / max(sum(timings.seconds.get(k, 0.0) for k in STREAM_STAGES), 1e-9),
+        len(objects),
+        wall,
+        stages,
+        memory,
+    )
+    return RunResult(
+        path,
+        "done",
+        grid.slide_id,
+        tiles,
+        len(objects),
+        wall,
+        tuple(written),
+        dict(timings.seconds),
+        peak,
+    )
+
+
+@log_call
+def run_batch(cfg: RunConfig) -> list[RunResult]:
+    """Run every slide of ``cfg``, skipping finished ones when ``cfg.resume``. Writes a
+    ``batch-<time>.parquet`` summary and a ``run-<time>.log`` into the output folder.
+
+    Raises:
+        ValueError: no slides, two slides with the same file stem, or a task mismatch.
+    """
+    slides = cfg.slide_paths()
+    if not slides:
+        raise ValueError(f"no slides match {cfg.slides!r}")
+    stems = Counter(p.stem for p in slides)
+    clashes = sorted(s for s, n in stems.items() if n > 1)
+    if clashes:
+        raise ValueError(f"slides share output names {clashes}; give them distinct file names")
+    cfg.outputs.dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    sink = add_file_sink(cfg.outputs.dir / f"run-{stamp}.log")
+    start = time.perf_counter()
+    try:
+        model = load(cfg)
+        logger.info(
+            "run start: {} slides, model {} {} ({}), settings {}",
+            len(slides),
+            model.card.name,
+            model.card.version,
+            cfg.model,
+            model.settings_hash,
+        )
+        results = [_run_one(cfg, path, model) for path in slides]
+        summary = cfg.outputs.dir / f"batch-{stamp}.parquet"
+        _batch_frame(results, model.settings_hash).write_parquet(summary)
+        counts = Counter(r.status for r in results)
+        logger.info(
+            "run end: {} done, {} skipped, {} failed in {:.1f} s; summary {}",
+            counts["done"],
+            counts["skipped"],
+            counts["failed"],
+            time.perf_counter() - start,
+            summary,
+        )
+        return results
+    finally:
+        logger.remove(sink)
+
+
+def _run_one(cfg: RunConfig, path: Path, model: Model) -> RunResult:
+    if cfg.resume and is_done(cfg, path, model.settings_hash):
+        logger.info("slide={} skipped: finished with the same settings", path.name)
+        return RunResult(path, "skipped")
+    try:
+        return run_slide(cfg, path, model)
+    except Exception as e:  # noqa: BLE001  recorded in the batch summary, the run carries on
+        logger.exception("slide={} failed", path.name)
+        return RunResult(path, "failed", error=f"{type(e).__name__}: {e}")
+
+
+def _batch_frame(results: list[RunResult], settings_hash: str) -> pl.DataFrame:
+    stages = sorted({k for r in results for k in r.timings})
+    rows = [
+        {
+            "slide": str(r.slide),
+            "status": r.status,
+            "slide_id": r.slide_id,
+            "tiles": r.tiles,
+            "objects": r.objects,
+            "wall_s": r.wall_s,
+            **{f"{k}_s": r.timings.get(k, 0.0) for k in stages},
+            "peak_rss_mb": r.peak_memory.get("rss_mb"),
+            "error": r.error,
+            "settings_hash": settings_hash,
+        }
+        for r in results
+    ]
+    return pl.DataFrame(rows, infer_schema_length=None)
+
+
+def _output_mpp(cfg: RunConfig, grid: SlideGrid) -> float:
+    return cfg.segmentation.output_mpp or max(2.0, grid.mpp)
+
+
+def _stitcher(
+    cfg: RunConfig, card: ModelCard, grid: SlideGrid, output_mpp: float | None
+) -> Stitcher:
+    if isinstance(card, SegmentationCard):
+        assert output_mpp is not None
+        return SegmentationStitcher(
+            card,
+            grid,
+            output_mpp=output_mpp,
+            simplify_px=cfg.segmentation.simplify_px,
+            min_area_um2=cfg.segmentation.min_area_um2,
+            keep_labels=cfg.outputs.tiff,
+        )
+    if not isinstance(card, DetectionCard):
+        raise NotImplementedError(f"no stitcher for {card.task} yet")
+    return DetectionStitcher(
+        card,
+        grid,
+        score_threshold=cfg.detection.score_threshold,
+        nms_iou=cfg.detection.nms_iou,
+    )

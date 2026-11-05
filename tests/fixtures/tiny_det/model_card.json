@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "name": "tiny-det",
+  "version": "1",
+  "task": "detection",
+  "framework": "torch",
+  "file": "model.pt2",
+  "precision": "fp32",
+  "input": {
+    "name": "image",
+    "tile_size": 16,
+    "mpp": 0.5,
+    "channel_order": "RGB",
+    "layout": "NCHW",
+    "dtype": "float32",
+    "normalisation": {
+      "mean": [
+        0.485,
+        0.456,
+        0.406
+      ],
+      "std": [
+        0.229,
+        0.224,
+        0.225
+      ],
+      "scale": 0.00392156862745098
+    },
+    "icc": true
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "lymphocyte",
+      "color": [
+        0,
+        0,
+        255
+      ]
+    },
+    {
+      "id": 1,
+      "name": "tumour",
+      "color": [
+        255,
+        0,
+        0
+      ]
+    }
+  ],
+  "recommended_overlap": 0.25,
+  "provenance": {
+    "training_run_id": "fixture"
+  },
+  "output": {
+    "box_format": "xyxy",
+    "box_units": "pixel",
+    "score_threshold": 0.5
+  }
+}
