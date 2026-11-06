@@ -59,12 +59,51 @@ only ever sees one input shape (TensorRT, CUDA graphs) and padding never reaches
 |---|---|---|
 | `local/onnx.py` | `onnx` | Needs the `[onnx]` extra. Providers: TensorRT EP if `libnvinfer.so.10` loads, then CUDA, then CPU. On CUDA, input and outputs stay on the GPU (IO binding + DLPack). The graph's input dtype must equal `card.input.dtype`, so fp16 graphs get fp16 inputs. |
 | `local/torch.py` | `torch` | `torch.export` (`.pt2`, preferred) or TorchScript (`.pt`, `.pth`, `.ts`; deprecated by torch 2.14). `inference_mode`, optional bf16 / fp16 autocast. |
-| `local/tensorrt.py` | `tensorrt` | Stub; TensorRT plans land in v0.2. |
-| `remote/triton.py` | | Stub; Triton gRPC client, v0.3. |
-| `remote/vllm.py` | | `VllmClient`, an OpenAI-compatible HTTP client for VLMs served by `vllm serve`; never imports `vllm`. See `remote/README.md`. |
+| `local/tensorrt.py` | `tensorrt` | TensorRT plans (`pathoinfer convert trt`), built per GPU and TensorRT version; needs `[trt]`. |
+| `remote/triton.py` | any | `TritonRuntime`: the protocol over gRPC to Triton (`runtime.triton_url`); preprocessing stays here. See `remote/README.md`. |
 
 `factory.make_runtime` picks the backend from `card.framework`. A `safetensors` card is
 rejected: it holds weights only.
+
+## VLMs
+
+Vision-language models (`VqaCard`) answer questions about slide crops instead of
+returning tensors, so they sit beside the `Runtime` protocol rather than inside it.
+Both ways of running them build the same chat message (`vlm.chat_messages`) and decode
+greedily, so a model answers alike either way:
+
+| Module | Runs | Install |
+|---|---|---|
+| `remote/vllm.py` | `VllmClient`: HTTP to a `vllm serve` server, with retries, timeouts and a concurrency limit. The way to serve. | `[vllm-client]` (httpx) |
+| `local/vllm_offline.py` | `OfflineVlm`: vLLM's Python engine in this process, for batch evaluation and captioning. The only module that imports `vllm`. | `[vllm]`, in its own venv |
+| `vlm.py` | Shared: images as data URLs or `file://` URIs, the chat message, and `parse_boxes`, which maps boxes in an answer to level-0 px through the `Crop` the image came from. | core |
+
+`serving/vllm.py` (`pathoinfer serve vllm MODEL`) builds the server's arguments from the
+card; `OfflineVlm` passes the same ones to `vllm.LLM`. The grounding chain these build
+toward (Qwen3-VL boxes, then SAM 3 masks) is in `docs/vlm_grounding.md`.
+
+### The vLLM venv
+
+vLLM 0.33 pins torch 2.14.0, numpy below 2.5 (through numba), transformers below 5.21 and
+compressed-tensors 0.17. Those clash with `[vlm-convert]` (llm-compressor pins
+compressed-tensors 0.20.1), and on Python 3.12 its mistral-common caps numpy below 2.4.
+So `[vllm]` is not in `[all]`, needs Python 3.13+, and lives in a venv of its own.
+The workspace lock resolves it as a separate fork (`[tool.uv] conflicts` in
+`pyproject.toml`), so the main venv keeps torch 2.14.1 and numpy 2.5.4:
+
+```bash
+cd packages/pathoinfer
+UV_PROJECT_ENVIRONMENT=.venv-vllm uv sync --python 3.13 --extra vllm
+.venv-vllm/bin/python -c "from pathoinfer.runtime.local.vllm_offline import OfflineVlm"
+```
+
+```python
+from pathoinfer.runtime.local.vllm_offline import OfflineVlm
+from pathoinfer.serving.vllm import VllmServeConfig
+
+vlm = OfflineVlm("models/pvqa-fp8", VllmServeConfig(max_model_len=4096))
+answers = vlm.generate([("crops/slide_name-01_0042.png", "Is there tumour?")], max_tokens=16)
+```
 
 ## Testing and benchmarks
 
@@ -73,3 +112,8 @@ rejected: it holds weights only.
 - `tests/runtime/test_local.py` runs the fixture model through every available runtime
   (CPU, CUDA, fp16, autocast) and compares each with ONNX on CPU within a tolerance.
 - `scripts/bench_infer.py MODEL_DIR...` prints tiles/s per runtime and precision.
+- `tests/runtime/test_vlm.py` pins `parse_boxes` (every unit and format to the same
+  level-0 box, clipping, JSON and text answers) and the image URLs;
+  `test_vllm_client.py` runs the client against a mocked server (retries, timeouts,
+  order, the concurrency limit); `test_vllm_offline.py` drives `OfflineVlm` through a
+  stand-in `vllm` module, and checks it refuses without vllm.

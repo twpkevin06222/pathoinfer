@@ -37,10 +37,10 @@ from pathoinfer.convert.parity import register_model
 from pathoinfer.convert.vlm import load_pairs, read_rgb
 from pathoinfer.registry.loader import load_vlm
 from pathoinfer.registry.model_card import Parity, VqaCard, VqaOutput
+from pathoinfer.runtime.vlm import Crop, parse_boxes
 
 Ask = Callable[[str, str], str]  # (image path, question) -> answer
 _ARTICLES = re.compile(r"\b(a|an|the)\b")
-_NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
 _BRACKETS = re.compile(r"\[([^\[\]]*)\]")
 
 
@@ -75,20 +75,10 @@ def normalise(answer: str) -> str:
 
 
 def parse_box(answer: str, output: VqaOutput, size: tuple[int, int]) -> list[float] | None:
-    """The first box in ``answer`` as ``xyxy`` image pixels: the first ``[...]`` holding
-    four numbers (as in Qwen-VL's ``{"bbox_2d": [x0, y0, x1, y1]}``), else the first four
-    standalone numbers of the text."""
-    lists = [_NUMBER.findall(inner) for inner in _BRACKETS.findall(answer)]
-    found = next((n for n in lists if len(n) >= 4), _NUMBER.findall(answer))
-    if len(found) < 4:
-        return None
-    numbers = [float(n) for n in found[:4]]
-    a, b, c, d = numbers
-    if output.box_format == "cxcywh":
-        a, b, c, d = a - c / 2, b - d / 2, a + c / 2, b + d / 2
-    scale = {"pixel": (1.0, 1.0), "normalised": size, "per_mille": (size[0] / 1000, size[1] / 1000)}
-    sx, sy = scale[output.box_units]
-    return [a * sx, b * sy, c * sx, d * sy]
+    """The first box in ``answer`` as ``xyxy`` pixels of the image of ``size`` (width,
+    height), read as ``runtime.vlm.parse_boxes`` does."""
+    grounding = parse_boxes(answer, output, Crop(0, 0, size[0], size[1], size))
+    return [float(v) for v in grounding.boxes[0]] if len(grounding) else None
 
 
 def iou(a: list[float] | None, b: list[float]) -> float:
@@ -184,7 +174,10 @@ def gate(
     card (and register it), on a fail write nothing."""
     from pathoinfer.runtime.remote.vllm import VllmClient
 
-    clients = [VllmClient(url, timeout_s=cfg.timeout_s) for url in (reference_url, candidate_url)]
+    clients = [
+        VllmClient(url, timeout_s=cfg.timeout_s, concurrency=cfg.concurrency)
+        for url in (reference_url, candidate_url)
+    ]
     try:
         report = check(
             reference,

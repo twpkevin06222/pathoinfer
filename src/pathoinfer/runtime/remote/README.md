@@ -1,13 +1,14 @@
 # pathoinfer - runtime/remote
 
 Clients for models served by another process: Triton Inference Server for tile models
-and a vLLM server for vision-language models (VLMs). pathoinfer only speaks the
-servers' network protocols. It never imports `vllm` or Triton's server code, never starts
-or stops servers, and needs none of their dependencies.
+and a vLLM server for vision-language models (VLMs). These modules only speak the
+servers' network protocols. They never import `vllm` or Triton's server code, never
+start or stop servers, and need none of their dependencies. (Offline vLLM generation in
+this process is `runtime/local/vllm_offline.py`, in its own venv.)
 
 | Module | Status | Extra | Talks to |
 |---|---|---|---|
-| `vllm.py` | `VllmClient`: one question about one image, greedy | `[vllm-client]` (httpx) | Any OpenAI-compatible server, normally `vllm serve` |
+| `vllm.py` | `VllmClient`: questions about images, greedy, with retries, timeouts and a concurrency limit | `[vllm-client]` (httpx) | Any OpenAI-compatible server, normally `vllm serve` |
 | `triton.py` | `TritonRuntime`: the `Runtime` protocol over gRPC | `[triton]` (tritonclient) | Triton Inference Server |
 
 `TritonRuntime` implements the same `Runtime` protocol as the local runtimes
@@ -28,34 +29,57 @@ Pin the vLLM version you deploy. A quantised folder's format (compressed-tensors
 
 ## vLLM (`vllm.py`)
 
-Start a server for a model folder (bf16, or one written by `pathoinfer convert vlm`):
+Print the server command for a model folder (bf16, or one written by
+`pathoinfer convert vlm`) and run it:
 
 ```bash
-vllm serve models/pvqa-fp8 --port 8000
+pathoinfer serve vllm models/pvqa-fp8 --config vllm.yaml
+# vllm serve models/pvqa-fp8 --host 0.0.0.0 --port 8000 --served-model-name pvqa \
+#   --dtype bfloat16 --max-model-len 8192 --gpu-memory-utilization 0.9 \
+#   --tensor-parallel-size 1 --limit-mm-per-prompt '{"image": 1}' --quantization compressed-tensors
 ```
 
-Then ask it about a crop:
+`serving/vllm.py` derives the command from the card: `dtype` from `precision` (quantised
+cards keep the vision encoder in bf16), `quantization` from the folder's
+`quantization_config` (a card and weights that disagree are refused),
+`--mm-processor-kwargs '{"max_pixels": ...}'` from `input.max_pixels`, and one image per
+prompt. `VllmServeConfig` (the YAML) sets `gpu_memory_utilization`, `max_model_len`
+(default 8192: a crop question needs far less than the model's maximum),
+`max_num_seqs`, `tensor_parallel_size`, `served_model_name` (default: the card's name),
+`allowed_local_media_path`, `host` and `port`.
+
+Then ask it about crops:
 
 ```python
 from pathoinfer.runtime.remote.vllm import VllmClient
 
-client = VllmClient("http://localhost:8000")  # model: the server's first, or model="..."
+client = VllmClient("http://localhost:8000", concurrency=16)
 answer = client.ask("crops/slide_name-01_0042.png", "Is there tumour in this image?")
+answers = client.ask_many([(crop, "Is there tumour?") for crop in crops])  # in order
 client.close()
 ```
 
-- `VllmClient(base_url, model=None, timeout_s=120.0, transport=None)`. Without `model` it
+- `VllmClient(base_url, model=None, *, timeout_s=120, retries=3, backoff_s=1.0,
+  concurrency=8, local_media=False, api_key=None, transport=None)`. Without `model` it
   asks `GET /v1/models` and uses the first one served. `transport` replaces the HTTP
   transport; tests pass `httpx.MockTransport`.
-- `ask(image, question, max_tokens=64)` posts one user message to
-  `POST /v1/chat/completions`: the image as a base64 data URL, then the question as text.
-  `temperature` is 0, so answers are reproducible, which parity relies on. It returns the
-  answer text and raises `httpx.HTTPStatusError` on an error response.
-- One request per call. Run calls from several threads for throughput: vLLM batches
-  concurrent requests itself. `convert vlm-parity` uses `concurrency` threads per server.
+- `ask(image, question, max_tokens=64, *, system=None, json_schema=None)` posts one
+  user message to `POST /v1/chat/completions`: the image, then the question.
+  `temperature` is 0, so answers are reproducible, which parity relies on. `json_schema`
+  sets `response_format`, so vLLM constrains the answer to that schema.
+- Images are files or RGB arrays. They go as base64 data URLs (arrays as PNG), or with
+  `local_media=True` as `file://` URIs, which skips encoding but needs a server started
+  with `--allowed-local-media-path` that sees the same paths.
+- At most `concurrency` requests are in flight per client, from any number of threads;
+  vLLM batches concurrent requests itself. `ask_many` runs `concurrency` at a time.
+- Connection errors, timeouts and HTTP 408, 429 and 5xx are retried `retries` times,
+  waiting `backoff_s`, then twice as long each time, with a warning per retry. Other
+  errors raise `httpx.HTTPStatusError` at once.
 
 Crops should be made the way the model was fine-tuned: the `VqaCard`'s `input.tile_size`
-and `input.mpp`.
+and `input.mpp`. Boxes in grounding answers become level-0 px with
+`runtime.vlm.parse_boxes(answer, card.output, Crop(x, y, width, height, image_size))`,
+where the crop is the level-0 region the image was read from.
 
 Used by `convert.vlm_parity.gate`, which asks a bf16 server and a quantised one the same
 eval questions (`convert/README.md`).
@@ -90,9 +114,11 @@ schema and, with `PATHOINFER_TRITON_URL` set to a server serving `tiny_dark_onnx
 (markers `gpu` and `slow`), that `TritonRuntime` matches the local ONNX runtime and that
 a whole slide gives the same result through Triton as locally.
 
-`tests/convert/test_vlm.py::test_vllm_client_sends_the_image_and_greedy_settings` runs
-`VllmClient` against `httpx.MockTransport`: the model name comes from `/v1/models`, the
-request carries the image as a PNG data URL, the question and `temperature: 0`, and the
-answer text comes back. A live server is exercised only by
+`tests/runtime/test_vllm_client.py` runs `VllmClient` against a mocked server
+(`httpx.MockTransport`): the request (model from `/v1/models`, image as a data URL or
+`file://` URI, `temperature: 0`, `response_format`, the API key), retries of 5xx, 429
+and timeouts, no retry of 4xx, answers in order, and the concurrency limit across
+threads. `tests/serving/test_vllm.py` checks the launch arguments, and in a venv with vLLM
+that each is an `EngineArgs` field and a `vllm serve` flag. A live server is exercised only by
 `tests/convert/test_vlm_full.py` (markers `gpu` and `slow`) when
 `PATHOINFER_VLLM_REFERENCE_URL` and `PATHOINFER_VLLM_CANDIDATE_URL` are set.

@@ -23,6 +23,9 @@
                                             the slide job API (FastAPI + uvicorn).
 ``pathoinfer serve triton-repo MODEL... --repository DIR``
                                             a Triton model repository from model folders.
+``pathoinfer serve vllm MODEL [--config VLLM.yaml]``
+                                            print the ``vllm serve`` command for a VLM
+                                            folder (dtype and quantisation from its card).
 ``pathoinfer convert vlm-merge BASE ADAPTER OUT --card CARD.yaml``
                                             merge LoRA adapters into a bf16 VLM folder.
 ``pathoinfer convert vlm SOURCE OUT --config VLM.yaml``
@@ -39,6 +42,7 @@ Only ``run`` and ``convert`` import torch, so every other command starts fast.
 
 import argparse
 import json
+import shlex
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -65,6 +69,7 @@ from pathoinfer.registry.loader import (
     graph_problems,
     load_any,
     load_model,
+    load_vlm,
     validate_folder,
 )
 from pathoinfer.registry.model_card import VqaCard
@@ -191,6 +196,10 @@ def _parser() -> argparse.ArgumentParser:
     repo.add_argument("--repository", type=Path, required=True)
     repo.add_argument("--config", type=Path, help="TritonRepoConfig YAML")
     repo.set_defaults(handler=_serve_triton_repo)
+    vllm = serve.add_parser("vllm", help="print the vllm serve command for a VLM folder")
+    vllm.add_argument("model", help="VLM source (folder, models:/, hf://)")
+    vllm.add_argument("--config", type=Path, help="VllmServeConfig YAML")
+    vllm.set_defaults(handler=_serve_vllm)
     merge = convert.add_parser("vlm-merge", help="merge LoRA adapters into a VLM")
     merge.add_argument("base", help="base model folder or Hugging Face Hub id")
     merge.add_argument("adapter", help="PEFT adapter folder or Hub id")
@@ -320,6 +329,15 @@ def _serve_triton_repo(args: argparse.Namespace) -> int:
 
     cfg = load_yaml(args.config, TritonRepoConfig) if args.config else TritonRepoConfig()
     write_repository(args.models, args.repository, cfg)
+    return 0
+
+
+def _serve_vllm(args: argparse.Namespace) -> int:
+    from pathoinfer.serving.vllm import VllmServeConfig, serve_command
+
+    cfg = load_yaml(args.config, VllmServeConfig) if args.config else VllmServeConfig()
+    card, folder = load_vlm(args.model)
+    sys.stdout.write(shlex.join(serve_command(card, folder, cfg)) + "\n")
     return 0
 
 

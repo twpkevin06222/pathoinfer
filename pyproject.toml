@@ -12,7 +12,7 @@ dependencies = [
     "duckdb>=2.0.0",
     "loguru>=0.7.3",
     "matplotlib>=3.11.2",
-    "numpy>=2.5.4",
+    "numpy>=2.4.6",
     "opencv-python-headless>=5.0.0.93",
     # Tiling and coordinate changes in patchology are breaking changes for pathoinfer.
     "patchology>=0.1.0,<0.2",
@@ -22,7 +22,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "shapely>=2",
     "tifffile>=2026.10.15",
-    "torch>=2.14.1",
+    "torch>=2.14.0",
     "tqdm>=4.70.1",
 ]
 
@@ -34,6 +34,11 @@ onnx = ["onnxruntime-gpu>=1.31.1"]
 trt = ["tensorrt"]
 triton = ["tritonclient[grpc]"]
 vllm-client = ["httpx"]
+# Offline vLLM generation (runtime/local/vllm_offline.py), in its own venv: vLLM 0.33 pins
+# torch 2.14.0, numpy<2.5 (numba), transformers<5.21 and compressed-tensors 0.17, which
+# clash with [vlm-convert]; not in [all]. uv locks it as a separate fork ([tool.uv]).
+# Python 3.13+: on 3.12 its mistral-common caps numpy below 2.4.
+vllm = ["vllm>=0.33.0; python_version >= '3.13' and sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # The slide job API; httpx downloads http(s) slides (and drives FastAPI's test client).
 serve = ["fastapi", "uvicorn", "httpx"]
 # Model conversion: FP16 and ONNX Runtime INT8 (with [onnx]), ModelOpt INT8/FP8.
@@ -61,6 +66,14 @@ hf = ["huggingface-hub"]
 # Only for io/interop.py's to_geodataframe(); never used by core or tests.
 geopandas = ["geopandas"]
 all = ["pathoinfer[onnx,trt,triton,vllm-client,serve,convert,vlm-convert,mlflow,hf,geopandas]"]
+
+[tool.uv]
+# [vllm] needs other versions of torch, transformers and compressed-tensors than
+# [vlm-convert] (and so [all]); these let the workspace lock resolve each on its own.
+conflicts = [
+    [{ package = "pathoinfer", extra = "vllm" }, { package = "pathoinfer", extra = "vlm-convert" }],
+    [{ package = "pathoinfer", extra = "vllm" }, { package = "pathoinfer", extra = "all" }],
+]
 
 # CUDA 13.0 builds of torch, as in pathotrain; uv needs one torch source per workspace.
 [tool.uv.sources]
@@ -100,7 +113,7 @@ extend-select = ["B", "I", "LOG", "T20", "TID", "UP"]
 "rasterio".msg = "No rasterio: vectorise with OpenCV and shapely."
 "osgeo".msg = "No GDAL: vectorise with OpenCV and shapely."
 "openslide".msg = "Read slides through patchology (patchology.open_slide), never openslide directly."
-"vllm".msg = "Never import vllm: talk to a vLLM server over HTTP (runtime/remote/vllm.py)."
+"vllm".msg = "Only runtime/local/vllm_offline.py loads vllm, lazily (require); elsewhere talk to a vLLM server over HTTP (runtime/remote/vllm.py)."
 
 [tool.ruff.lint.flake8-bugbear]
 # patchology's config dataclasses are frozen, so sharing one default instance is safe.
