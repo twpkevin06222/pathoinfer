@@ -1,0 +1,6 @@
+# Triton with the demo model's repository baked in, built from the pathoinfer image that
+# generated it (docker-compose.yml passes it as the `pathoinfer` build context). For your
+# own models use the official image and mount a repository at /models instead.
+FROM nvcr.io/nvidia/tritonserver:26.10-py3
+COPY --from=pathoinfer /opt/pathoinfer/demo/model_repository /models
+CMD ["tritonserver", "--model-repository=/models", "--model-control-mode=none"]

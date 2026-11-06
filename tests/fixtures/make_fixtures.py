@@ -111,6 +111,7 @@ def main() -> None:
     )
     detector()
     dark()
+    dark_onnx()
 
 
 class TinyDet(torch.nn.Module):
@@ -161,6 +162,35 @@ def dark() -> None:
     example = torch.zeros(2, 3, 64, 64)
     program = torch.export.export(TinyDark(), (example,), dynamic_shapes=({0: batch},))
     write_folder("tiny_dark", card, "model.pt2", lambda p: torch.export.save(program, p))
+
+
+def dark_onnx() -> None:
+    """tiny_dark as ONNX (for Triton and the Docker demo): the same function, written with
+    onnx.helper so it needs no exporter."""
+    card = json.loads((HERE / "tiny_dark" / "model_card.json").read_text())
+    card |= {"name": "tiny-dark-onnx", "framework": "onnx", "file": "model.onnx"}
+    constants = [
+        numpy_helper.from_array(np.array(0.85, np.float32), "threshold"),
+        numpy_helper.from_array(np.array(40.0, np.float32), "gain"),
+    ]
+    nodes = [
+        helper.make_node("ReduceMean", ["image"], ["mean"], axes=[1], keepdims=1),
+        helper.make_node("Sub", ["threshold", "mean"], ["margin"]),
+        helper.make_node("Mul", ["margin", "gain"], ["darker"]),
+        helper.make_node("Neg", ["darker"], ["lighter"]),
+        helper.make_node("Concat", ["lighter", "darker"], ["logits"], axis=1),
+    ]
+    graph = helper.make_graph(
+        nodes,
+        "tiny_dark",
+        [helper.make_tensor_value_info("image", TensorProto.FLOAT, ["batch", 3, 64, 64])],
+        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", 2, 64, 64])],
+        constants,
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 9
+    onnx.checker.check_model(model)
+    write_folder("tiny_dark_onnx", card, "model.onnx", lambda p: onnx.save(model, p))
 
 
 def write_folder(name: str, card: dict, file: str, save) -> None:  # type: ignore[no-untyped-def]

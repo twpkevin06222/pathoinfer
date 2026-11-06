@@ -19,6 +19,8 @@ LAZY = [
     "tritonclient",
     "httpx",
     "fastapi",
+    "uvicorn",
+    "grpc",
     "modelopt",
     "llmcompressor",
     "transformers",

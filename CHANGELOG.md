@@ -23,6 +23,20 @@ config or output formats; the entry says so.
     `provenance.parity` and can register it in MLflow under an alias; a fail names the
     worst classes and layers and writes nothing.
 - TensorRT plan runtime: `framework: tensorrt` model folders run in `pathoinfer run`.
+- Serving:
+  - `TritonRuntime` (gRPC) implements the `Runtime` protocol; `runtime.triton_url` runs a
+    config's model on Triton with the engine unchanged.
+  - `pathoinfer serve triton-repo`: a Triton model repository (`config.pbtxt` built as
+    Triton's own protobuf, weights, card) from ONNX folders and TensorRT plans, with
+    dynamic batching from a config.
+  - `pathoinfer serve api`: a FastAPI slide job API (`POST /jobs`, status and progress,
+    outputs, cancel), each job's engine in its own process, bounded concurrency, state on
+    disk.
+  - `deploy/`: one Dockerfile (CPU, or CUDA with `TORCH_INDEX=cu130`), a compose stack
+    (Triton 26.10, API, demo client; the demo slide and repository are baked into the
+    images) and a GPU override.
+- `pathoinfer.tiling.synthetic.write_pyramid`: the synthetic slide, now in the package.
+- `run_slide(..., on_progress=)`: a callback after each batch with tiles done and total.
 - VLM conversion for Qwen3-VL / SmolVLM fine-tuned with TRL + PEFT
   (`docs/vlm_quantisation.md`): `pathoinfer convert vlm-merge` (LoRA into a bf16
   safetensors folder), `convert vlm` (llm-compressor `fp8`, `w4a16-awq` or

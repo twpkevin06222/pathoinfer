@@ -1,0 +1,9 @@
+# Only what the image needs: the package, the demo model and the deploy scripts.
+**
+!pyproject.toml
+!README.md
+!LICENSE
+!src/**
+!tests/fixtures/tiny_dark_onnx/**
+!deploy/demo/**
+**/__pycache__

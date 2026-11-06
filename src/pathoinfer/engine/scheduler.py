@@ -9,7 +9,7 @@ stops the reader processes and the stitcher thread before raising.
 
 import resource
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -21,6 +21,8 @@ from pathoinfer.stitch.base import StitchResult, StitchThread
 from pathoinfer.tiling.dataset import Item
 
 STITCH_QUEUE = 8
+# Called after each batch with (tiles done, tiles in the slide).
+Progress = Callable[[int, int], None]
 
 
 @dataclass
@@ -48,12 +50,17 @@ def peak_memory_mb() -> dict[str, float]:
 
 
 def stream(
-    loader: DataLoader[Item], runtime: Runtime, thread: StitchThread, timings: Timings
+    loader: DataLoader[Item],
+    runtime: Runtime,
+    thread: StitchThread,
+    timings: Timings,
+    on_progress: Progress | None = None,
 ) -> tuple[StitchResult, int]:
     """Run every batch of ``loader`` through ``runtime`` into ``thread``; returns the
     stitched result and the number of tiles."""
     with timings.stage("start"):  # starts the reader processes
         batches = iter(loader)
+    total = len(loader.dataset.grid.tiles)  # type: ignore[attr-defined]  # TileDataset
     tiles = 0
     try:
         while True:
@@ -67,6 +74,8 @@ def stream(
             with timings.stage("stitch_wait"):
                 thread.put(specs, outputs)
             tiles += len(specs)
+            if on_progress is not None:
+                on_progress(tiles, total)
         with timings.stage("stitch_finalize"):
             return thread.finalize(), tiles
     finally:
