@@ -45,6 +45,7 @@ config or output formats; the entry says so.
 - Extras: `[convert]` is now NVIDIA ModelOpt (>= 0.48), `onnx` and the helpers
   ModelOpt's ONNX quantiser imports, listed without ModelOpt's own `[onnx]` pins so
   onnxruntime-gpu 1.31 stays; `llmcompressor` moved to the new `[vlm-convert]`.
+  and is shared by segmentation and heatmaps; segmentation output is unchanged.
 
 ## [0.1.0] - 2026-11-06
 
