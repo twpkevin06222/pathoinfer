@@ -45,6 +45,7 @@ from pathoinfer.registry.model_card import (
     ModelCard,
     Parity,
     SegmentationCard,
+    parse_any_card,
     parse_card,
 )
 from pathoinfer.runtime.base import Runtime, preprocess, resolve_device
@@ -219,7 +220,7 @@ def register_model(folder: Path, name: str, alias: str, tracking_uri: str | None
     model ``name`` and point ``alias`` at it; returns the version."""
     mlflow = require("mlflow", extra("mlflow"))
     client = mlflow.MlflowClient(tracking_uri=tracking_uri)
-    card = parse_card(json.loads((folder / CARD_FILE).read_text()))
+    card = parse_any_card(json.loads((folder / CARD_FILE).read_text()))
     experiment = client.get_experiment_by_name("pathoinfer-convert") or client.get_experiment(
         client.create_experiment("pathoinfer-convert")
     )

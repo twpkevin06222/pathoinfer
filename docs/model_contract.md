@@ -25,7 +25,7 @@ provenance only.
 
 ## Fields
 
-A card is one of three variants, chosen by `task`. Each variant accepts only its own
+A card is one of four variants, chosen by `task`. Each variant accepts only its own
 fields: a detection card has no `background_id`, and every card's `output` must match its
 task.
 
@@ -89,6 +89,27 @@ Every label is a foreground class, so a detection card has no `background_id`.
 | `output.tensor` | str, default `logits` | `(batch, n_classes)` output |
 | `output.activation` | `logits` \| `probs` | Whether softmax is already applied |
 | `output.n_classes` | int | Must equal `len(classes)` |
+
+### Vision-language models (`vqa`)
+
+A VLM is a Hugging Face model folder (`config.json`, safetensors shards, processor
+files) that vLLM serves, so its card is a separate variant, `VqaCard`, without the tile
+fields above (no `classes`, `normalisation` or `output` tensors). It is written by
+`pathoinfer convert vlm-merge` and `convert vlm` (`docs/vlm_quantisation.md`), read with
+`registry.loader.load_vlm`; `load_model` refuses it.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `task` | `vqa` | required | Selects the variant |
+| `framework`, `file` | `hf`, `config.json` | fixed | A Hugging Face model folder |
+| `architecture` | str | required | transformers class, e.g. `Qwen3VLForConditionalGeneration` |
+| `precision` | `bf16` \| `fp16` \| `fp8` \| `int8` \| `int4` | `bf16` | The language model's weights (`int4` for W4A16); vision stays bf16 |
+| `input.tile_size`, `input.mpp` | int, float | required | How slide crops are made for the model |
+| `input.max_pixels` | int or null | null | Cap on what the processor resizes crops to |
+| `input.icc` | bool | `true` | ICC profile -> sRGB before cropping |
+| `output.grounding` | bool | `false` | Answers contain boxes |
+| `output.box_format`, `output.box_units` | `xyxy` \| `cxcywh`; `pixel` \| `normalised` \| `per_mille` | `xyxy`, `per_mille` | How boxes in answers are written (Qwen-VL: per mille) |
+| `name`, `version`, `schema_version`, `provenance` | | | As for tile models |
 
 ## Sources and resolution
 

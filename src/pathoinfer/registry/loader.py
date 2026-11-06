@@ -29,7 +29,7 @@ from pydantic import ValidationError
 from pathoinfer._extras import extra, require
 from pathoinfer._logging import log_call
 from pathoinfer.registry import legacy
-from pathoinfer.registry.model_card import ModelCard, Task, parse_card
+from pathoinfer.registry.model_card import AnyCard, ModelCard, Task, VqaCard, parse_any_card
 from pathoinfer.registry.onnx_info import read_onnx
 
 CARD_FILE = "model_card.json"
@@ -44,7 +44,24 @@ class CardError(ValueError):
 
 @log_call
 def load_model(source: str | Path, cache_dir: Path = CACHE_DIR) -> tuple[ModelCard, Path]:
-    """Return ``(card, model_dir)``; the model file is ``model_dir / card.file``."""
+    """Return ``(card, model_dir)`` for a tile model; the model file is
+    ``model_dir / card.file``. A VLM folder raises CardError (use :func:`load_vlm`)."""
+    card, folder = load_any(source, cache_dir)
+    if isinstance(card, VqaCard):
+        raise CardError(f"{source} is a vqa model; load it with load_vlm and serve it with vLLM")
+    return card, folder
+
+
+@log_call
+def load_vlm(source: str | Path, cache_dir: Path = CACHE_DIR) -> tuple[VqaCard, Path]:
+    """Return ``(card, model_dir)`` for a vision-language model folder."""
+    card, folder = load_any(source, cache_dir)
+    if not isinstance(card, VqaCard):
+        raise CardError(f"{source} is a {card.task} model, not a vqa model")
+    return card, folder
+
+
+def load_any(source: str | Path, cache_dir: Path = CACHE_DIR) -> tuple[AnyCard, Path]:
     text = str(source)
     if text.startswith("models:/"):
         return resolve_local(_download_mlflow(text, cache_dir))
@@ -53,7 +70,7 @@ def load_model(source: str | Path, cache_dir: Path = CACHE_DIR) -> tuple[ModelCa
     return resolve_local(Path(source))
 
 
-def resolve_local(path: Path) -> tuple[ModelCard, Path]:
+def resolve_local(path: Path) -> tuple[AnyCard, Path]:
     if path.is_dir() and (path / CARD_FILE).exists():
         return validate_folder(path), path
     onnx = _single_onnx(path)
@@ -73,7 +90,7 @@ def resolve_local(path: Path) -> tuple[ModelCard, Path]:
 
 
 @log_call
-def validate_folder(folder: Path) -> ModelCard:
+def validate_folder(folder: Path) -> AnyCard:
     """Parse ``folder/model_card.json`` and check the model file it names exists."""
     try:
         data = json.loads((folder / CARD_FILE).read_text())
@@ -82,9 +99,9 @@ def validate_folder(folder: Path) -> ModelCard:
     return _checked(data, folder, str(folder / CARD_FILE))
 
 
-def graph_problems(card: ModelCard, folder: Path) -> list[str]:
+def graph_problems(card: AnyCard, folder: Path) -> list[str]:
     """How an ONNX model's graph disagrees with its card: tensor names and tile size."""
-    if card.framework != "onnx":
+    if isinstance(card, VqaCard) or card.framework != "onnx":
         return []
     info = read_onnx(folder / card.file)
     shape = info.inputs.get(card.input.name)
@@ -100,13 +117,13 @@ def graph_problems(card: ModelCard, folder: Path) -> list[str]:
     return problems
 
 
-def parse_or_raise(data: Any, origin: str) -> ModelCard:
-    """:func:`parse_card`, with errors as a CardError listing ``field.path: problem``."""
+def parse_or_raise(data: Any, origin: str) -> AnyCard:
+    """:func:`parse_any_card`, with errors as a CardError listing ``field.path: problem``."""
     task = data.get("task") if isinstance(data, dict) else None
     if task not in get_args(Task):
         raise CardError(f"{origin}: task must be one of {', '.join(get_args(Task))}, got {task!r}")
     try:
-        return parse_card(data)
+        return parse_any_card(data)
     except ValidationError as e:
         problems = [
             f"  {'.'.join(str(part) for part in err['loc'][1:]) or '(card)'}: {err['msg']}"
@@ -115,7 +132,7 @@ def parse_or_raise(data: Any, origin: str) -> ModelCard:
         raise CardError(f"{origin} is not a valid {task} card:\n" + "\n".join(problems)) from e
 
 
-def _checked(data: Any, folder: Path, origin: str) -> ModelCard:
+def _checked(data: Any, folder: Path, origin: str) -> AnyCard:
     card = parse_or_raise(data, origin)
     if not (folder / card.file).is_file():
         raise CardError(f"{origin} names {card.file!r}, which is not in {folder}")

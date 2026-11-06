@@ -1,7 +1,8 @@
 # pathoinfer - convert
 
 Turns a full-precision model folder into faster variants for deployment: FP16, INT8 or
-FP8 ONNX, and TensorRT plans for a specific GPU. Every step writes a **new** model folder
+FP8 ONNX and TensorRT plans for tile models, and FP8 or 4-bit vision-language models
+(VLMs) for vLLM. Every step writes a **new** model folder
 and never edits one in place. A variant is trusted only after `convert parity` has
 compared it with its reference through the real stitchers and written it with the result
 in its card.
@@ -15,6 +16,7 @@ Post-training quantisation (PTQ) only: quantisation-aware training belongs in tr
 pip install "pathoinfer[onnx,convert]"        # FP16, ONNX Runtime INT8, ModelOpt INT8/FP8
 pip install "pathoinfer[onnx,convert,trt]"     # plus TensorRT plans (several GB)
 pip install "pathoinfer[mlflow]"               # to register passed variants
+pip install "pathoinfer[vlm-convert,vllm-client]"  # VLMs: llm-compressor, PEFT, httpx
 ```
 
 `[convert]` lists the helpers NVIDIA ModelOpt's ONNX quantiser needs instead of
@@ -158,6 +160,127 @@ of the slide amplifies a few flipped pixels into a large Dice drop: on a random 
 network with 0.5% tumour pixels, INT8 logits within 5.5% of FP32, with 99.7% of pixels
 agreeing, still gave a Dice of 0.67.
 
+## Vision-language models (`vlm.py`, `vlm_parity.py`)
+
+For Qwen3-VL and SmolVLM fine-tuned with TRL + PEFT. pathoinfer never imports vllm: it
+writes folders that `vllm serve` loads and talks to vLLM servers over HTTP. Run vLLM in
+its own environment; it pins its own torch and transformers. When to choose `fp8`,
+`w4a16-awq` or `w4a16-gptq`, and measurements on Qwen3-VL-2B, are in
+[docs/vlm_quantisation.md](../../../docs/vlm_quantisation.md).
+
+```bash
+pathoinfer convert vlm-merge Qwen/Qwen3-VL-2B-Instruct runs/lora-final models/pvqa-bf16 \
+    --card card.yaml
+pathoinfer convert vlm models/pvqa-bf16 models/pvqa-fp8 --config vlm.yaml
+# with `vllm serve models/pvqa-bf16 --port 8000` and `vllm serve models/pvqa-fp8 --port 8001` running:
+pathoinfer convert vlm-parity models/pvqa-bf16 models/pvqa-fp8 models/pvqa-fp8-blackwell \
+    --config vlm_parity.yaml \
+    --reference-url http://localhost:8000 --candidate-url http://localhost:8001 \
+    [--register pvqa --alias fp8-blackwell] [--tracking-uri URI] [--report parity.json]
+```
+
+### Merge (`vlm-merge`)
+
+`merge_lora(base, adapter, out, card)` loads the base model (a local folder or Hugging
+Face Hub id) in bf16, applies the PEFT adapter, merges it into the weights and saves a
+safetensors folder with the base model's processor. `--card` gives the card fields the
+weights cannot:
+
+```yaml
+# card.yaml
+name: pvqa
+version: "1"
+input: {tile_size: 448, mpp: 0.5}   # how slide crops were made for fine-tuning
+output: {grounding: false}           # true if answers contain boxes
+```
+
+The folder gets a `VqaCard` (task `vqa`, framework `hf`, file `config.json`) with
+`architecture` from the model config, `precision: bf16` and the base model as
+`parent_model`. `registry.loader.load_vlm` reads it; `load_model` refuses it, because
+tile code paths cannot run a VLM.
+
+### Quantise (`vlm`)
+
+```yaml
+# vlm.yaml (VlmQuantConfig)
+scheme: w4a16-gptq                   # fp8, w4a16-awq or w4a16-gptq
+calibration:                         # VqaDataConfig; needed for the w4a16 schemes
+  path: data/calibration/pairs.jsonl # .jsonl, .csv or .parquet: image, question (, answer)
+  samples: 256                       # seeded random subset; null for every row
+  seed: 0
+max_seq_len: 2048
+extra_ignore: []                     # more module patterns to keep in bf16
+```
+
+`quantise_vlm(source, out, cfg)` runs one llm-compressor recipe on the **language model
+only**:
+
+| Scheme | Recipe | Calibration | Card `precision` |
+|---|---|---|---|
+| `fp8` | `QuantizationModifier`, `FP8_DYNAMIC` (W8A8, per-token dynamic activations) | none | `fp8` |
+| `w4a16-awq` | `AWQModifier` (smoothing) then `QuantizationModifier`, `W4A16_ASYM` | image + question pairs | `int4` |
+| `w4a16-gptq` | `GPTQModifier`, `W4A16` | image + question pairs | `int4` |
+
+- **Ignore list** (`ignore_list`). Built from the model's module names: every child of
+  `model` except the language model (`model.language_model` in Qwen3-VL,
+  `model.text_model` in SmolVLM), plus `lm_head`. It is checked before quantising: each
+  pattern must match a Linear layer, and every quantised layer must sit inside the
+  language model. Qwen3-VL keeps `model.visual` (blocks, `merger`,
+  `deepstack_merger_list`); SmolVLM keeps `model.vision_model` and `model.connector`.
+- **AWQ mappings** (`awq_mappings`). llm-compressor 0.15 has none for the VLM classes, so
+  pathoinfer uses the Qwen3/Llama decoder pairs (`input_layernorm` -> q/k/v,
+  `v_proj` -> `o_proj`, `post_attention_layernorm` -> gate/up, `up_proj` -> `down_proj`),
+  anchored inside the language model so the similarly named vision layers are left
+  alone. Each must match a module, or the run stops.
+- **Calibration** (`load_pairs`). Rows are pathology crops made the way the model saw
+  them in fine-tuning, with questions (and answers, which are appended as the assistant
+  turn). Images are read with OpenCV. Each pair goes through the model's processor and
+  chat template, one sample at a time, and the decoder layers are calibrated in sequence.
+  The calibration-set hash covers each image's content and question, so renaming a file
+  does not change it, but changing its pixels does.
+
+The output folder holds compressed-tensors safetensors (`float-quantized` for FP8,
+`pack-quantized` for W4A16), the processor and a card with `precision`, version suffix
+(`+fp8`, `+w4a16-awq`, `+w4a16-gptq`), `parent_model`, `calibration_set_hash` (null for
+FP8) and `source_metadata.quantisation` (scheme, ignore patterns, number of quantised
+layers).
+
+### Parity (`vlm-parity`)
+
+```yaml
+# vlm_parity.yaml (VlmParityConfig)
+eval:
+  path: data/pathvqa_eval/pairs.jsonl  # image, question, answer (, box in image pixels)
+  samples: null
+tolerances:
+  accuracy_drop_max: 0.02
+  iou_drop_max: 0.05
+max_tokens: 64
+concurrency: 8                          # questions in flight per server
+timeout_s: 120
+```
+
+`gate(reference, candidate, cfg, out, reference_url, candidate_url)` asks both servers
+every eval question greedily (temperature 0) through `runtime.remote.vllm.VllmClient`,
+an OpenAI-compatible client that sends each crop as a data URL. It scores:
+
+- **accuracy**: exact match with the true answer after `normalise` (boxes in `[...]`
+  dropped, lower case, punctuation and a/an/the removed), as PathVQA scores answers;
+- **IoU**, for grounding cards on rows with a `box`: `parse_box` reads the first
+  bracketed box of four numbers (e.g. Qwen-VL's `{"bbox_2d": [...]}`) in the card's
+  `box_format` and `box_units` (`per_mille`, `normalised` or `pixel`) and converts it to
+  image pixels.
+
+Metrics are `accuracy_reference`, `accuracy`, `accuracy_drop` and, for grounding,
+`iou_reference`, `iou`, `iou_drop`. The candidate passes when each drop is within its
+tolerance. A pass copies it to the new folder `out` with `provenance.parity` (reference,
+eval-set hash, metrics, tolerances, time) and, with `--register NAME --alias ALIAS`,
+registers it in MLflow. A fail lists up to five questions the reference answered right
+and the candidate wrong, exits 1, and writes and registers nothing.
+
+`check(reference, candidate, cfg, ask_reference, ask_candidate)` takes any two
+`(image, question) -> answer` functions, so parity can also run against other servers.
+
 ## Python
 
 ```python
@@ -193,6 +316,21 @@ print(report.summary())
 - parity metrics: AUC, one-to-one detection matching, and F1, count difference and AUC
   through the real detection and heatmap stitchers;
 - the CLI, and MLflow registration under an alias (with full MLflow).
+
+`tests/convert/test_vlm.py` (needs transformers; recipes also llm-compressor, merging
+PEFT): on tiny random Qwen3-VL and SmolVLM models, the ignore list keeps exactly the
+vision encoder, projector and `lm_head`; AWQ mappings stay inside the language model;
+the three recipes build and llm-compressor accepts them; a LoRA merge equals PEFT's own
+merge and writes a valid card; quantised cards record precision, parent and calibration
+hash; calibration pairs are sampled and hashed by content; answers normalise, boxes parse
+in every unit; parity passes, fails on accuracy and on box drift, and names the
+regressed questions; and the vLLM client sends the image and greedy settings.
+
+`tests/convert/test_vlm_full.py` (markers `gpu` and `slow`): quantises a real VLM with
+each scheme and gates it through two vLLM servers. Set `PATHOINFER_VLM_MODEL` (a bf16
+folder with a VqaCard), `PATHOINFER_VLM_PAIRS` and, for parity,
+`PATHOINFER_VLM_CANDIDATE`, `PATHOINFER_VLLM_REFERENCE_URL` and
+`PATHOINFER_VLLM_CANDIDATE_URL`; otherwise the tests skip.
 
 `tests/convert/test_nvidia.py` (needs ModelOpt; plans also need TensorRT and a GPU):
 ModelOpt INT8 on a 32-channel network; FP16 plans build, come from the cache the second
