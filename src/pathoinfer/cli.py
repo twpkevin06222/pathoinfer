@@ -19,6 +19,12 @@
                                             compare through the real stitchers; on a pass
                                             write OUT with the parity in its card (and
                                             register it with --register NAME --alias A).
+``pathoinfer convert vlm-merge BASE ADAPTER OUT --card CARD.yaml``
+                                            merge LoRA adapters into a bf16 VLM folder.
+``pathoinfer convert vlm SOURCE OUT --config VLM.yaml``
+                                            quantise a VLM's language model for vLLM.
+``pathoinfer convert vlm-parity REFERENCE CANDIDATE OUT --config P.yaml
+    --reference-url URL --candidate-url URL``   VLM parity through two vLLM servers.
 
 ``--log-level LEVEL`` (or ``-v`` for DEBUG), before the command, sets pathoinfer's and
 patchology's log level; the default comes from ``PATHOINFER_LOG_LEVEL`` and
@@ -40,9 +46,24 @@ from pydantic import ValidationError
 
 from patchology import SlideOpenError, open_slide
 from pathoinfer._logging import PACKAGES, set_log_level
-from pathoinfer.config import ParityConfig, QuantConfig, RunConfig, load_config, load_yaml
+from pathoinfer.config import (
+    ParityConfig,
+    QuantConfig,
+    RunConfig,
+    VlmParityConfig,
+    VlmQuantConfig,
+    load_config,
+    load_yaml,
+)
 from pathoinfer.registry.create import create_folder
-from pathoinfer.registry.loader import CardError, graph_problems, load_model, validate_folder
+from pathoinfer.registry.loader import (
+    CardError,
+    graph_problems,
+    load_any,
+    load_model,
+    validate_folder,
+)
+from pathoinfer.registry.model_card import VqaCard
 from pathoinfer.tiling.slide_id import slide_id
 
 LEVELS = ["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL", "ALL"]
@@ -152,6 +173,29 @@ def _parser() -> argparse.ArgumentParser:
     parity.add_argument("--tracking-uri", help="MLflow tracking URI (default: environment)")
     parity.add_argument("--report", type=Path, help="write the parity report as JSON")
     parity.set_defaults(handler=_convert_parity)
+    merge = convert.add_parser("vlm-merge", help="merge LoRA adapters into a VLM")
+    merge.add_argument("base", help="base model folder or Hugging Face Hub id")
+    merge.add_argument("adapter", help="PEFT adapter folder or Hub id")
+    merge.add_argument("out", type=Path)
+    merge.add_argument("--card", type=Path, required=True, help="VqaCard fields (YAML)")
+    merge.set_defaults(handler=_convert_vlm_merge)
+    vlm = convert.add_parser("vlm", help="quantise a VLM's language model (llm-compressor)")
+    vlm.add_argument("source", help="bf16 VLM folder with a VqaCard")
+    vlm.add_argument("out", type=Path)
+    vlm.add_argument("--config", type=Path, required=True, help="VlmQuantConfig YAML")
+    vlm.set_defaults(handler=_convert_vlm)
+    vparity = convert.add_parser("vlm-parity", help="VLM parity gate through vLLM servers")
+    vparity.add_argument("reference")
+    vparity.add_argument("candidate")
+    vparity.add_argument("out", type=Path, help="new folder written on a pass")
+    vparity.add_argument("--config", type=Path, required=True, help="VlmParityConfig YAML")
+    vparity.add_argument("--reference-url", required=True, help="vLLM serving the reference")
+    vparity.add_argument("--candidate-url", required=True, help="vLLM serving the candidate")
+    vparity.add_argument("--register", metavar="NAME")
+    vparity.add_argument("--alias")
+    vparity.add_argument("--tracking-uri")
+    vparity.add_argument("--report", type=Path)
+    vparity.set_defaults(handler=_convert_vlm_parity)
     return parser
 
 
@@ -244,8 +288,56 @@ def _convert_parity(args: argparse.Namespace) -> int:
     return 0 if report.passed else 1
 
 
+def _convert_vlm_merge(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.vlm import merge_lora
+
+    merge_lora(args.base, args.adapter, args.out, yaml.safe_load(args.card.read_text()))
+    return 0
+
+
+def _convert_vlm(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.vlm import quantise_vlm
+
+    quantise_vlm(args.source, args.out, load_yaml(args.config, VlmQuantConfig))
+    return 0
+
+
+def _convert_vlm_parity(args: argparse.Namespace) -> int:
+    from pathoinfer.convert.vlm_parity import gate, report_json
+
+    if bool(args.register) != bool(args.alias):
+        raise ValueError("--register and --alias go together")
+    report = gate(
+        args.reference,
+        args.candidate,
+        load_yaml(args.config, VlmParityConfig),
+        args.out,
+        args.reference_url,
+        args.candidate_url,
+        (args.register, args.alias) if args.register else None,
+        args.tracking_uri,
+    )
+    if args.report:
+        args.report.write_text(report_json(report))
+    return 0 if report.passed else 1
+
+
 def _info_model(args: argparse.Namespace) -> int:
-    card, model_dir = load_model(args.source)
+    any_card, model_dir = load_any(args.source)
+    if isinstance(any_card, VqaCard):
+        logger.info(
+            "{} {} | vqa | {} {} | {} px at {} mpp | grounding {} | folder {}",
+            any_card.name,
+            any_card.version,
+            any_card.architecture,
+            any_card.precision,
+            any_card.input.tile_size,
+            any_card.input.mpp,
+            any_card.output.grounding,
+            model_dir,
+        )
+        return 0
+    card = any_card
     logger.info(
         "{} {} | {} | {} {} ({}) | {} px at {} mpp, {} {} {} | overlap {:.2f} | folder {}",
         card.name,

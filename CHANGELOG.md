@@ -23,6 +23,16 @@ config or output formats; the entry says so.
     `provenance.parity` and can register it in MLflow under an alias; a fail names the
     worst classes and layers and writes nothing.
 - TensorRT plan runtime: `framework: tensorrt` model folders run in `pathoinfer run`.
+- VLM conversion for Qwen3-VL / SmolVLM fine-tuned with TRL + PEFT
+  (`docs/vlm_quantisation.md`): `pathoinfer convert vlm-merge` (LoRA into a bf16
+  safetensors folder), `convert vlm` (llm-compressor `fp8`, `w4a16-awq` or
+  `w4a16-gptq` on the language model only, vision encoder and projector kept bf16 by a
+  verified ignore list, calibrated on pathology image + question pairs) and
+  `convert vlm-parity` (PathVQA accuracy and box IoU against bf16 through two vLLM
+  servers; registers only within tolerance). `runtime/remote/vllm.py` gains a minimal
+  OpenAI-compatible client.
+- ModelCard: `VqaCard` variant (task `vqa`, framework `hf`, precision up to `int4`),
+  additive at schema version 1.
 - ModelCard: optional `provenance.parity` (schema stays version 1).
 - `stitch.heatmap.HeatmapStitcher`: tile classification to one probability vector per
   tile core (overlap-area weighted), per-class float16 rasters, one QuPath detection per
@@ -42,6 +52,8 @@ config or output formats; the entry says so.
   polygons have fewer vertices.
 - The mask-to-polygon code moved from `stitch/segmentation.py` to `post/vectorise.py`
   and is shared by segmentation and heatmaps.
+- `[vlm-convert]` is `llmcompressor>=0.15` and `peft>=0.21.2`. llm-compressor caps
+  torch at 2.14.1 and transformers at 5.21.0, which holds the workspace lock there.
 - Extras: `[convert]` is now NVIDIA ModelOpt (>= 0.48), `onnx` and the helpers
   ModelOpt's ONNX quantiser imports, listed without ModelOpt's own `[onnx]` pins so
   onnxruntime-gpu 1.31 stays; `llmcompressor` moved to the new `[vlm-convert]`.

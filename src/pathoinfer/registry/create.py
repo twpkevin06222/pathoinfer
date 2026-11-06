@@ -14,7 +14,7 @@ from typing import Any
 from pathoinfer._logging import log_call
 from pathoinfer.registry import legacy
 from pathoinfer.registry.loader import CARD_FILE, CARD_KEY, LEGACY_KEY, CardError, parse_or_raise
-from pathoinfer.registry.model_card import FRAMEWORK_SUFFIXES, ModelCard
+from pathoinfer.registry.model_card import FRAMEWORK_SUFFIXES, ModelCard, VqaCard
 from pathoinfer.registry.onnx_info import read_onnx
 
 
@@ -29,6 +29,8 @@ def create_folder(model: Path, out: Path, fields: dict[str, Any]) -> ModelCard:
         raise CardError(f"{out} is not empty")
     card_fields = _deep_merge(_prefill(model), fields)
     card = parse_or_raise(card_fields, f"the card for {model}")
+    if isinstance(card, VqaCard):
+        raise CardError("card create wraps one model file; VLM folders come from `convert vlm`")
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(model, out / card.file)
     (out / CARD_FILE).write_text(card.model_dump_json(indent=2) + "\n")

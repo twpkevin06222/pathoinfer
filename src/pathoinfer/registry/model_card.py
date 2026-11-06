@@ -1,8 +1,10 @@
 """ModelCard: everything pathoinfer needs to run a model besides its weights.
 
 pathoinfer owns this schema. A model folder holds the model file and ``model_card.json``.
-The card is one of three task variants, discriminated by ``task``, so a detection card
-cannot carry a background class or a segmentation output. The published JSON Schema is
+The card is one of four task variants, discriminated by ``task``, so a detection card
+cannot carry a background class or a segmentation output. ``ModelCard`` is the three
+tile-model variants every tile code path takes; ``VqaCard`` describes a vision-language
+model folder; ``AnyCard`` is either. The published JSON Schema is
 ``schema/model_card.v1.json``; ``docs/model_contract.md`` documents every field.
 """
 
@@ -12,7 +14,8 @@ from typing import Annotated, Any, Literal, Self
 import matplotlib
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-Task = Literal["segmentation", "detection", "classification"]
+TileTask = Literal["segmentation", "detection", "classification"]
+Task = Literal["segmentation", "detection", "classification", "vqa"]
 Byte = Annotated[int, Field(ge=0, le=255)]
 Positive = Annotated[float, Field(gt=0)]
 RGB = tuple[int, int, int]
@@ -185,15 +188,64 @@ class ClassificationCard(_Card):
     output: ClassificationOutput
 
 
+class VqaInput(_Strict):
+    """How the slide crops a VLM sees are made: ``tile_size`` px squares read at ``mpp``
+    (ICC-converted when ``icc``); ``max_pixels`` caps what the processor resizes to."""
+
+    tile_size: int = Field(gt=0)
+    mpp: float = Field(gt=0)
+    max_pixels: int | None = Field(None, gt=0)
+    icc: bool = True
+
+
+class VqaOutput(_Strict):
+    """``grounding``: the model answers with boxes, in ``box_format`` and ``box_units``
+    (``per_mille``: 0-1000 of the image, as Qwen-VL; ``normalised``: 0-1; ``pixel``)."""
+
+    grounding: bool = False
+    box_format: Literal["xyxy", "cxcywh"] = "xyxy"
+    box_units: Literal["pixel", "normalised", "per_mille"] = "per_mille"
+
+
+class VqaCard(_Strict):
+    """A vision-language model answering questions about slide crops, as a Hugging Face
+    model folder (``config.json``, safetensors shards, processor files) that vLLM serves.
+    ``precision`` is the language model's weights (``int4`` for W4A16); the vision
+    encoder and projector stay bf16."""
+
+    schema_version: Literal[1] = 1
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    task: Literal["vqa"]
+    framework: Literal["hf"] = "hf"
+    file: Literal["config.json"] = "config.json"
+    architecture: str = Field(
+        min_length=1, description="transformers class, e.g. Qwen3VLForConditionalGeneration."
+    )
+    precision: Literal["bf16", "fp16", "fp8", "int8", "int4"] = "bf16"
+    input: VqaInput
+    output: VqaOutput = VqaOutput()
+    provenance: Provenance = Provenance()
+
+
 ModelCard = Annotated[
     SegmentationCard | DetectionCard | ClassificationCard, Field(discriminator="task")
 ]
+AnyCard = Annotated[
+    SegmentationCard | DetectionCard | ClassificationCard | VqaCard, Field(discriminator="task")
+]
 CARD: TypeAdapter[ModelCard] = TypeAdapter(ModelCard)
+ANY_CARD: TypeAdapter[AnyCard] = TypeAdapter(AnyCard)
 
 
 def parse_card(data: object) -> ModelCard:
-    """Validate a card from parsed JSON. Raises pydantic.ValidationError."""
+    """Validate a tile-model card from parsed JSON. Raises pydantic.ValidationError."""
     return CARD.validate_python(data)
+
+
+def parse_any_card(data: object) -> AnyCard:
+    """Validate any card, tile model or VLM. Raises pydantic.ValidationError."""
+    return ANY_CARD.validate_python(data)
 
 
 def card_json_schema() -> dict[str, Any]:
@@ -201,7 +253,7 @@ def card_json_schema() -> dict[str, Any]:
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "ModelCard",
-        **CARD.json_schema(),
+        **ANY_CARD.json_schema(),
     }
 
 

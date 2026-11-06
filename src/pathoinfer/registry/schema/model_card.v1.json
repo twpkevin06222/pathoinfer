@@ -716,13 +716,173 @@
       ],
       "title": "SegmentationOutput",
       "type": "object"
+    },
+    "VqaCard": {
+      "additionalProperties": false,
+      "description": "A vision-language model answering questions about slide crops, as a Hugging Face\nmodel folder (``config.json``, safetensors shards, processor files) that vLLM serves.\n``precision`` is the language model's weights (``int4`` for W4A16); the vision\nencoder and projector stay bf16.",
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "task": {
+          "const": "vqa",
+          "title": "Task",
+          "type": "string"
+        },
+        "framework": {
+          "const": "hf",
+          "default": "hf",
+          "title": "Framework",
+          "type": "string"
+        },
+        "file": {
+          "const": "config.json",
+          "default": "config.json",
+          "title": "File",
+          "type": "string"
+        },
+        "architecture": {
+          "description": "transformers class, e.g. Qwen3VLForConditionalGeneration.",
+          "minLength": 1,
+          "title": "Architecture",
+          "type": "string"
+        },
+        "precision": {
+          "default": "bf16",
+          "enum": [
+            "bf16",
+            "fp16",
+            "fp8",
+            "int8",
+            "int4"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/VqaInput"
+        },
+        "output": {
+          "$ref": "#/$defs/VqaOutput",
+          "default": {
+            "grounding": false,
+            "box_format": "xyxy",
+            "box_units": "per_mille"
+          }
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": {
+            "training_run_id": null,
+            "calibration_set_hash": null,
+            "parent_model": null,
+            "parity": null,
+            "source_metadata": {}
+          }
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "task",
+        "architecture",
+        "input"
+      ],
+      "title": "VqaCard",
+      "type": "object"
+    },
+    "VqaInput": {
+      "additionalProperties": false,
+      "description": "How the slide crops a VLM sees are made: ``tile_size`` px squares read at ``mpp``\n(ICC-converted when ``icc``); ``max_pixels`` caps what the processor resizes to.",
+      "properties": {
+        "tile_size": {
+          "exclusiveMinimum": 0,
+          "title": "Tile Size",
+          "type": "integer"
+        },
+        "mpp": {
+          "exclusiveMinimum": 0,
+          "title": "Mpp",
+          "type": "number"
+        },
+        "max_pixels": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Pixels"
+        },
+        "icc": {
+          "default": true,
+          "title": "Icc",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tile_size",
+        "mpp"
+      ],
+      "title": "VqaInput",
+      "type": "object"
+    },
+    "VqaOutput": {
+      "additionalProperties": false,
+      "description": "``grounding``: the model answers with boxes, in ``box_format`` and ``box_units``\n(``per_mille``: 0-1000 of the image, as Qwen-VL; ``normalised``: 0-1; ``pixel``).",
+      "properties": {
+        "grounding": {
+          "default": false,
+          "title": "Grounding",
+          "type": "boolean"
+        },
+        "box_format": {
+          "default": "xyxy",
+          "enum": [
+            "xyxy",
+            "cxcywh"
+          ],
+          "title": "Box Format",
+          "type": "string"
+        },
+        "box_units": {
+          "default": "per_mille",
+          "enum": [
+            "pixel",
+            "normalised",
+            "per_mille"
+          ],
+          "title": "Box Units",
+          "type": "string"
+        }
+      },
+      "title": "VqaOutput",
+      "type": "object"
     }
   },
   "discriminator": {
     "mapping": {
       "classification": "#/$defs/ClassificationCard",
       "detection": "#/$defs/DetectionCard",
-      "segmentation": "#/$defs/SegmentationCard"
+      "segmentation": "#/$defs/SegmentationCard",
+      "vqa": "#/$defs/VqaCard"
     },
     "propertyName": "task"
   },
@@ -735,6 +895,9 @@
     },
     {
       "$ref": "#/$defs/ClassificationCard"
+    },
+    {
+      "$ref": "#/$defs/VqaCard"
     }
   ]
 }

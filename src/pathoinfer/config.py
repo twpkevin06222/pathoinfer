@@ -13,7 +13,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from patchology import ArtifactConfig, Backend, TissueConfig
-from pathoinfer.registry.model_card import Byte, Task
+from pathoinfer.registry.model_card import Byte, TileTask
 
 
 class _Strict(BaseModel):
@@ -101,7 +101,7 @@ class RunConfig(_Strict):
     ``resume`` skips slides whose outputs exist from a run with the same settings.
     ``class_colors`` replaces the colour of any class, by class name."""
 
-    task: Task
+    task: TileTask
     model: str
     slides: str | list[str]
     tiling: TilingConfig = TilingConfig()
@@ -225,6 +225,56 @@ class ParityConfig(_Strict):
     tolerances: ParityTolerances = ParityTolerances()
     segmentation: SegmentationOptions = SegmentationOptions()
     detection: DetectionOptions = DetectionOptions()
+
+
+class VqaDataConfig(_Strict):
+    """Image + question pairs: a ``.jsonl``, ``.csv`` or ``.parquet`` table with columns
+    ``image`` (a path, relative to the table's folder) and ``question``, plus ``answer``
+    and optionally ``box`` (``[x0, y0, x1, y1]`` in image pixels) for evaluation. Pathology
+    crops at the model's tile size and mpp, not generic images. ``samples`` None uses
+    every row; otherwise a seeded random subset."""
+
+    path: Path
+    samples: int | None = Field(256, gt=0)
+    seed: int = 0
+
+
+class VlmQuantConfig(_Strict):
+    """``pathoinfer convert vlm``: llm-compressor recipe for the language model only.
+
+    ``fp8``: W8A8 FP8 (dynamic per-token activations; no calibration data needed).
+    ``w4a16-awq`` / ``w4a16-gptq``: 4-bit weights, 16-bit activations, calibrated on
+    ``calibration`` (a few hundred pathology image + question pairs). The vision encoder
+    and projector stay bf16, as does ``lm_head``; ``extra_ignore`` adds module patterns."""
+
+    scheme: Literal["fp8", "w4a16-awq", "w4a16-gptq"] = "fp8"
+    calibration: VqaDataConfig | None = None
+    max_seq_len: int = Field(2048, gt=0)
+    extra_ignore: list[str] = []
+
+    @model_validator(mode="after")
+    def _calibration_when_needed(self) -> "VlmQuantConfig":
+        if self.scheme != "fp8" and self.calibration is None:
+            raise ValueError(f"{self.scheme} needs calibration data")
+        return self
+
+
+class VlmParityTolerances(_Strict):
+    """Bounds on how much worse the candidate may be than the bf16 reference."""
+
+    accuracy_drop_max: float = Field(0.02, ge=0, le=1)
+    iou_drop_max: float = Field(0.05, ge=0, le=1)
+
+
+class VlmParityConfig(_Strict):
+    """``pathoinfer convert vlm-parity``: both models answer ``eval`` (rows with
+    ``answer``; ``box`` for grounding models) through OpenAI-compatible vLLM servers."""
+
+    eval: VqaDataConfig
+    tolerances: VlmParityTolerances = VlmParityTolerances()
+    max_tokens: int = Field(64, gt=0)
+    concurrency: int = Field(8, gt=0)
+    timeout_s: float = Field(120.0, gt=0)
 
 
 def load_yaml[T: BaseModel](path: str | Path, model: type[T]) -> T:
