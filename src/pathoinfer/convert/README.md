@@ -266,10 +266,10 @@ an OpenAI-compatible client that sends each crop as a data URL. It scores:
 
 - **accuracy**: exact match with the true answer after `normalise` (boxes in `[...]`
   dropped, lower case, punctuation and a/an/the removed), as PathVQA scores answers;
-- **IoU**, for grounding cards on rows with a `box`: `parse_box` reads the first
-  bracketed box of four numbers (e.g. Qwen-VL's `{"bbox_2d": [...]}`) in the card's
-  `box_format` and `box_units` (`per_mille`, `normalised` or `pixel`) and converts it to
-  image pixels.
+- **IoU**, for grounding cards on rows with a `box`: `parse_box` takes the first box
+  that `runtime.vlm.parse_boxes` reads (Qwen-VL's `{"bbox_2d": [...]}` JSON, else a
+  bracketed box of four numbers) in the card's `box_format` and `box_units`
+  (`per_mille`, `normalised` or `pixel`), as image pixels clipped to the image.
 
 Metrics are `accuracy_reference`, `accuracy`, `accuracy_drop` and, for grounding,
 `iou_reference`, `iou`, `iou_drop`. The candidate passes when each drop is within its

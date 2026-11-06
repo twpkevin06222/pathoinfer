@@ -9,8 +9,12 @@ import pytest
 ROOT = Path(__file__).parents[1]
 FILES = sorted([*(ROOT / "src").rglob("*.py"), *(ROOT / "tests").rglob("*.py")])
 BANNED = {"pandas", "geopandas", "pathotrain", "vllm"}
-# The optional interop helper is the only place geopandas may appear.
-ALLOWED = {ROOT / "src/pathoinfer/io/interop.py": {"geopandas"}}
+# The optional interop helper is the only place geopandas may appear, and offline vLLM
+# generation the only place vllm may (lazily, through require).
+ALLOWED = {
+    ROOT / "src/pathoinfer/io/interop.py": {"geopandas"},
+    ROOT / "src/pathoinfer/runtime/local/vllm_offline.py": {"vllm"},
+}
 # Heavy optional dependencies that only their own extra's code may load, and lazily.
 LAZY = [
     "onnx",
@@ -29,6 +33,7 @@ LAZY = [
     "mlflow",
     "huggingface_hub",
     "geopandas",
+    "vllm",
 ]
 
 

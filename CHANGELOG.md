@@ -48,6 +48,21 @@ config or output formats; the entry says so.
 - ModelCard: `VqaCard` variant (task `vqa`, framework `hf`, precision up to `int4`),
   additive at schema version 1.
 - ModelCard: optional `provenance.parity` (schema stays version 1).
+- VLM runtimes (`runtime/README.md`, `docs/vlm_grounding.md` for the Qwen3-VL to SAM 3
+  grounding design):
+  - `VllmClient` now retries connection errors, timeouts and HTTP 408/429/5xx with
+    backoff, caps requests in flight (`concurrency`, across threads), asks lists in
+    order (`ask_many`), sends images as data URLs or `file://` URIs (`local_media`),
+    takes RGB arrays, a system prompt, an API key and a JSON schema for the answer.
+  - `runtime.vlm.parse_boxes`: every box in an answer (Qwen JSON with labels, or text),
+    in the card's units and format, to level-0 px through the `Crop` it was read from.
+  - `runtime/local/vllm_offline.py` (`OfflineVlm`): offline batch generation with
+    vLLM's Python API, the only module that imports `vllm`. New `[vllm]` extra, not in
+    `[all]`: it needs its own Python 3.13 venv, which the workspace lock resolves as a
+    separate fork.
+  - `pathoinfer serve vllm MODEL`: the `vllm serve` command for a VLM folder, with dtype
+    and quantisation from the card and folder, `max_pixels`, and sizing from
+    `VllmServeConfig`.
 - `stitch.heatmap.HeatmapStitcher`: tile classification to one probability vector per
   tile core (overlap-area weighted), per-class float16 rasters, one QuPath detection per
   core with `prob_<class>` measurements, optional thresholded region polygons and
@@ -68,6 +83,10 @@ config or output formats; the entry says so.
   and is shared by segmentation and heatmaps.
 - `[vlm-convert]` is `llmcompressor>=0.15` and `peft>=0.21.2`. llm-compressor caps
   torch at 2.14.1 and transformers at 5.21.0, which holds the workspace lock there.
+- Floors lowered for the `[vllm]` fork: torch to 2.14.0 and numpy to 2.4.6 (the main
+  environment still resolves torch 2.14.1 and numpy 2.5.4).
+- The VLM parity gate reads boxes with `runtime.vlm.parse_boxes` (clipped to the image)
+  and its clients run `concurrency` requests at once.
 - Extras: `[convert]` is now NVIDIA ModelOpt (>= 0.48), `onnx` and the helpers
   ModelOpt's ONNX quantiser imports, listed without ModelOpt's own `[onnx]` pins so
   onnxruntime-gpu 1.31 stays; `llmcompressor` moved to the new `[vlm-convert]`.

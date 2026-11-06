@@ -16,7 +16,6 @@ Heavy imports (transformers, peft, llmcompressor) are inside the functions, so t
 module imports without the ``[vlm-convert]`` extra.
 """
 
-import base64
 import hashlib
 import json
 import os
@@ -305,13 +304,6 @@ def read_rgb(path: str | Path) -> NDArray[np.uint8]:
     if image is None:
         raise ValueError(f"cannot read image {path}")
     return np.asarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), dtype=np.uint8)
-
-
-def image_data_url(path: str | Path) -> str:
-    """The image file as a data URL, as OpenAI-compatible servers take it."""
-    suffix = Path(path).suffix.lower().lstrip(".")
-    mime = "jpeg" if suffix in ("jpg", "jpeg") else suffix
-    return f"data:image/{mime};base64," + base64.b64encode(Path(path).read_bytes()).decode()
 
 
 def _card(fields: Mapping[str, Any], **overrides: Any) -> VqaCard:

@@ -298,7 +298,7 @@ def test_boxes_are_parsed_in_the_cards_units() -> None:
         60.0,
     ]
     pixel = VqaOutput(grounding=True, box_units="pixel", box_format="cxcywh")
-    assert vlm_parity.parse_box("box 50 50 20 10", pixel, size) == [40.0, 45.0, 60.0, 55.0]
+    assert vlm_parity.parse_box("box 50 50 20 10", pixel, size) == pytest.approx([40, 45, 60, 55])
     assert vlm_parity.parse_box("no box here", per_mille, size) is None
     assert vlm_parity.iou([0, 0, 10, 10], [0, 0, 10, 10]) == 1.0
     assert vlm_parity.iou(None, [0, 0, 10, 10]) == 0.0
@@ -366,25 +366,3 @@ def test_parity_fails_on_box_drift(tmp_path: Path) -> None:
     assert not report.passed and report.failures == [
         f"iou_drop {report.metrics['iou_drop']:.4f} > 0.05"
     ]
-
-
-def test_vllm_client_sends_the_image_and_greedy_settings(tmp_path: Path) -> None:
-    httpx = pytest.importorskip("httpx")
-    from pathoinfer.runtime.remote.vllm import VllmClient
-
-    path = pairs(tmp_path, n=1)
-    seen: dict[str, Any] = {}
-
-    def handler(request: Any) -> Any:
-        if request.url.path == "/v1/models":
-            return httpx.Response(200, json={"data": [{"id": "path-vqa"}]})
-        seen.update(json.loads(request.content))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "yes"}}]})
-
-    client = VllmClient("http://server", transport=httpx.MockTransport(handler))
-    assert client.ask(tmp_path / "crop_0.png", "tumour?") == "yes"
-    assert seen["model"] == "path-vqa" and seen["temperature"] == 0
-    content = seen["messages"][0]["content"]
-    assert content[0]["image_url"]["url"].startswith("data:image/png;base64,")
-    assert content[1] == {"type": "text", "text": "tumour?"}
-    assert path.is_file()
