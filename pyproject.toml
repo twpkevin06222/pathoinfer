@@ -34,7 +34,8 @@ onnx = ["onnxruntime-gpu>=1.31.1"]
 trt = ["tensorrt"]
 triton = ["tritonclient[grpc]"]
 vllm-client = ["httpx"]
-serve = ["fastapi", "uvicorn"]
+# The slide job API; httpx downloads http(s) slides (and drives FastAPI's test client).
+serve = ["fastapi", "uvicorn", "httpx"]
 # Model conversion: FP16 and ONNX Runtime INT8 (with [onnx]), ModelOpt INT8/FP8.
 # ModelOpt's own [onnx] extra pins onnxruntime-gpu<1.31 and onnx~=1.21, which clash with
 # the workspace; its ONNX quantiser's imports are listed here instead, at the versions
@@ -110,6 +111,7 @@ known-first-party = ["patchology", "pathoinfer"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/pathoinfer/io/interop.py" = ["TID251"]  # the one geopandas interop helper
+"deploy/demo/*" = ["T20"]  # demo scripts report to the terminal
 
 [tool.mypy]
 strict = true

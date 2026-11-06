@@ -20,7 +20,7 @@ from loguru import logger
 from patchology import open_slide
 from pathoinfer._logging import add_file_sink, log_call
 from pathoinfer.config import RunConfig
-from pathoinfer.engine.scheduler import STITCH_QUEUE, Timings, peak_memory_mb, stream
+from pathoinfer.engine.scheduler import STITCH_QUEUE, Progress, Timings, peak_memory_mb, stream
 from pathoinfer.io.objects import ObjectTable, RunInfo
 from pathoinfer.io.writers.geojson import write_geojson
 from pathoinfer.io.writers.parquet import write_parquet, write_summary
@@ -109,8 +109,11 @@ def is_done(cfg: RunConfig, slide: Path, settings_hash: str) -> bool:
 
 
 @log_call
-def run_slide(cfg: RunConfig, path: Path, model: Model | None = None) -> RunResult:
-    """Run one slide end to end and write its outputs; raises on failure."""
+def run_slide(
+    cfg: RunConfig, path: Path, model: Model | None = None, on_progress: Progress | None = None
+) -> RunResult:
+    """Run one slide end to end and write its outputs; raises on failure. ``on_progress``
+    is called after each batch with (tiles done, tiles in the slide)."""
     model = model or load(cfg)
     card = model.card
     start = time.perf_counter()
@@ -141,7 +144,7 @@ def run_slide(cfg: RunConfig, path: Path, model: Model | None = None) -> RunResu
     )
     try:
         thread = StitchThread(make_stitcher(cfg, card, grid, output_mpp), STITCH_QUEUE)
-        result, tiles = stream(loader, model.runtime, thread, timings)
+        result, tiles = stream(loader, model.runtime, thread, timings, on_progress)
     finally:
         loader.dataset.close()  # type: ignore[attr-defined]  # TileDataset; open with 0 workers
 

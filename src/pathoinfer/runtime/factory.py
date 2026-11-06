@@ -42,5 +42,10 @@ BUILDERS: dict[Framework, Callable[[ModelCard, Path, RuntimeConfig], Runtime]] =
 
 @log_call
 def make_runtime(card: ModelCard, model_dir: Path, config: RuntimeConfig) -> Runtime:
-    """``model_dir`` is the folder ``registry.loader.load_model`` returned with ``card``."""
+    """``model_dir`` is the folder ``registry.loader.load_model`` returned with ``card``.
+    With ``config.triton_url`` the model runs on that Triton server instead."""
+    if config.triton_url:
+        from pathoinfer.runtime.remote.triton import TritonRuntime
+
+        return TritonRuntime(card, config.triton_url, config.triton_model, config.batch_size)
     return BUILDERS[card.framework](card, model_dir / card.file, config)

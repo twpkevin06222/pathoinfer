@@ -19,6 +19,10 @@
                                             compare through the real stitchers; on a pass
                                             write OUT with the parity in its card (and
                                             register it with --register NAME --alias A).
+``pathoinfer serve api [--jobs-dir DIR] [--max-jobs N]``
+                                            the slide job API (FastAPI + uvicorn).
+``pathoinfer serve triton-repo MODEL... --repository DIR``
+                                            a Triton model repository from model folders.
 ``pathoinfer convert vlm-merge BASE ADAPTER OUT --card CARD.yaml``
                                             merge LoRA adapters into a bf16 VLM folder.
 ``pathoinfer convert vlm SOURCE OUT --config VLM.yaml``
@@ -173,6 +177,20 @@ def _parser() -> argparse.ArgumentParser:
     parity.add_argument("--tracking-uri", help="MLflow tracking URI (default: environment)")
     parity.add_argument("--report", type=Path, help="write the parity report as JSON")
     parity.set_defaults(handler=_convert_parity)
+    serve = commands.add_parser("serve", help="serve models and slide jobs").add_subparsers(
+        dest="serve_command", required=True
+    )
+    api = serve.add_parser("api", help="run the slide job API")
+    api.add_argument("--host", default="0.0.0.0")
+    api.add_argument("--port", type=int, default=8080)
+    api.add_argument("--jobs-dir", type=Path, default=Path("jobs"))
+    api.add_argument("--max-jobs", type=int, default=1, help="jobs running at once")
+    api.set_defaults(handler=_serve_api)
+    repo = serve.add_parser("triton-repo", help="write a Triton model repository")
+    repo.add_argument("models", nargs="+", help="model sources (folders, models:/, hf://)")
+    repo.add_argument("--repository", type=Path, required=True)
+    repo.add_argument("--config", type=Path, help="TritonRepoConfig YAML")
+    repo.set_defaults(handler=_serve_triton_repo)
     merge = convert.add_parser("vlm-merge", help="merge LoRA adapters into a VLM")
     merge.add_argument("base", help="base model folder or Hugging Face Hub id")
     merge.add_argument("adapter", help="PEFT adapter folder or Hub id")
@@ -286,6 +304,23 @@ def _convert_parity(args: argparse.Namespace) -> int:
     if args.report:
         args.report.write_text(json.dumps(asdict(report), indent=2) + "\n")
     return 0 if report.passed else 1
+
+
+def _serve_api(args: argparse.Namespace) -> int:
+    from pathoinfer._extras import extra, require
+    from pathoinfer.serving.api import create_app
+
+    uvicorn = require("uvicorn", extra("serve"))
+    uvicorn.run(create_app(args.jobs_dir, args.max_jobs), host=args.host, port=args.port)
+    return 0
+
+
+def _serve_triton_repo(args: argparse.Namespace) -> int:
+    from pathoinfer.serving.triton_repo import TritonRepoConfig, write_repository
+
+    cfg = load_yaml(args.config, TritonRepoConfig) if args.config else TritonRepoConfig()
+    write_repository(args.models, args.repository, cfg)
+    return 0
 
 
 def _convert_vlm_merge(args: argparse.Namespace) -> int:

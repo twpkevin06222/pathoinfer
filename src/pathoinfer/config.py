@@ -41,12 +41,16 @@ class RuntimeConfig(_Strict):
     """How the model executes, in this process. ``device`` is ``auto`` (CUDA when
     available), ``cpu``, ``cuda`` or ``cuda:N``. ``tensorrt`` lets ONNX models use the
     TensorRT EP when its libraries load. ``autocast`` runs PyTorch models in ``bf16`` or
-    ``fp16``; otherwise a model runs at its card's precision."""
+    ``fp16``; otherwise a model runs at its card's precision. ``triton_url`` (gRPC, e.g.
+    ``triton:8001``) runs the model on a Triton server instead, under ``triton_model``
+    (default: the card's name); the model folder is still read for its card."""
 
     device: str = Field("auto", pattern=r"^(auto|cpu|cuda(:\d+)?)$")
     batch_size: int = Field(32, gt=0)
     tensorrt: bool = True
     autocast: Literal["bf16", "fp16"] | None = None
+    triton_url: str | None = None
+    triton_model: str | None = None
 
 
 class LoaderConfig(_Strict):

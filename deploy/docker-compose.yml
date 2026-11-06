@@ -1,0 +1,52 @@
+# The slide job API with its models served by Triton, and a demo job on a synthetic slide.
+#
+#   docker compose -f deploy/docker-compose.yml up --build --exit-code-from demo
+#
+# CPU only by default; add deploy/docker-compose.gpu.yml to give Triton the GPU.
+# The demo's slide and Triton repository are made when the images are built, so every
+# service here is long-running except `demo` (Compose's --exit-code-from does not return
+# when a one-shot setup service has already exited).
+name: pathoinfer
+
+services:
+  api:
+    image: pathoinfer:${PATHOINFER_IMAGE_TAG:-cpu}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        TORCH_INDEX: ${TORCH_INDEX:-cpu}
+    environment:
+      PATHOINFER_TRITON_URL: triton:8001
+    volumes: [data:/data]
+    ports: ["8080:8080"]
+    shm_size: 2gb  # DataLoader workers pass tiles through shared memory
+    depends_on:
+      triton: {condition: service_healthy}
+
+  triton:
+    image: pathoinfer-triton-demo:26.10
+    build:
+      context: .
+      dockerfile: Dockerfile.triton
+      additional_contexts:
+        pathoinfer: service:api
+    ports: ["8000:8000", "8001:8001", "8002:8002"]
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8000/v2/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  # Client: submits a job on the synthetic slide, checks its outputs, exits.
+  demo:
+    image: pathoinfer:${PATHOINFER_IMAGE_TAG:-cpu}
+    command:
+      ["python", "/opt/pathoinfer/demo/scripts/run_job.py", "http://api:8080",
+       "/opt/pathoinfer/demo/data/slides/synthetic.tiff"]
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  data:

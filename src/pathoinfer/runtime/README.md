@@ -61,7 +61,7 @@ only ever sees one input shape (TensorRT, CUDA graphs) and padding never reaches
 | `local/torch.py` | `torch` | `torch.export` (`.pt2`, preferred) or TorchScript (`.pt`, `.pth`, `.ts`; deprecated by torch 2.14). `inference_mode`, optional bf16 / fp16 autocast. |
 | `local/tensorrt.py` | `tensorrt` | Stub; TensorRT plans land in v0.2. |
 | `remote/triton.py` | | Stub; Triton gRPC client, v0.3. |
-| `remote/vllm.py` | | Stub; OpenAI-compatible HTTP client for VLMs. Never imports `vllm`. |
+| `remote/vllm.py` | | `VllmClient`, an OpenAI-compatible HTTP client for VLMs served by `vllm serve`; never imports `vllm`. See `remote/README.md`. |
 
 `factory.make_runtime` picks the backend from `card.framework`. A `safetensors` card is
 rejected: it holds weights only.
