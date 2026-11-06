@@ -118,6 +118,7 @@
             "training_run_id": null,
             "calibration_set_hash": null,
             "parent_model": null,
+            "parity": null,
             "source_metadata": {}
           }
         },
@@ -258,6 +259,7 @@
             "training_run_id": null,
             "calibration_set_hash": null,
             "parent_model": null,
+            "parity": null,
             "source_metadata": {}
           }
         },
@@ -466,6 +468,52 @@
       "title": "Normalisation",
       "type": "object"
     },
+    "Parity": {
+      "additionalProperties": false,
+      "description": "How a converted model matched its full-precision reference through the real\nstitchers. Written only when every metric was within its tolerance.",
+      "properties": {
+        "reference": {
+          "description": "name@version of the full-precision model compared.",
+          "title": "Reference",
+          "type": "string"
+        },
+        "tile_set_hash": {
+          "description": "Hash of the tiles both models ran on.",
+          "title": "Tile Set Hash",
+          "type": "string"
+        },
+        "metrics": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Worst value of each metric over classes, e.g. dice_min, f1_min, auc_min.",
+          "title": "Metrics",
+          "type": "object"
+        },
+        "tolerances": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "The bound each metric had to meet.",
+          "title": "Tolerances",
+          "type": "object"
+        },
+        "checked_at": {
+          "description": "UTC time of the check, ISO 8601.",
+          "title": "Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference",
+        "tile_set_hash",
+        "metrics",
+        "tolerances",
+        "checked_at"
+      ],
+      "title": "Parity",
+      "type": "object"
+    },
     "Provenance": {
       "additionalProperties": false,
       "properties": {
@@ -505,6 +553,18 @@
           "default": null,
           "description": "name@version of the model this one was converted from.",
           "title": "Parent Model"
+        },
+        "parity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Parity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parity with the reference model, for converted models."
         },
         "source_metadata": {
           "additionalProperties": true,
@@ -587,6 +647,7 @@
             "training_run_id": null,
             "calibration_set_hash": null,
             "parent_model": null,
+            "parity": null,
             "source_metadata": {}
           }
         },

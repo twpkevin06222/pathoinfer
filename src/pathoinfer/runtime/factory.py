@@ -8,6 +8,7 @@ from pathoinfer.config import RuntimeConfig
 from pathoinfer.registry.model_card import Framework, ModelCard
 from pathoinfer.runtime.base import Runtime
 from pathoinfer.runtime.local.onnx import OnnxRuntime
+from pathoinfer.runtime.local.tensorrt import TensorRTRuntime
 from pathoinfer.runtime.local.torch import TorchRuntime
 
 
@@ -24,7 +25,7 @@ def _torch(card: ModelCard, path: Path, config: RuntimeConfig) -> Runtime:
 
 
 def _tensorrt(card: ModelCard, path: Path, config: RuntimeConfig) -> Runtime:
-    raise NotImplementedError("TensorRT plan runtime lands in v0.2; use the ONNX model's TRT EP")
+    return TensorRTRuntime(card, path, device=config.device, batch_size=config.batch_size)
 
 
 def _safetensors(card: ModelCard, path: Path, config: RuntimeConfig) -> Runtime:

@@ -13,6 +13,7 @@ BANNED = {"pandas", "geopandas", "pathotrain", "vllm"}
 ALLOWED = {ROOT / "src/pathoinfer/io/interop.py": {"geopandas"}}
 # Heavy optional dependencies that only their own extra's code may load, and lazily.
 LAZY = [
+    "onnx",
     "onnxruntime",
     "tensorrt",
     "tritonclient",

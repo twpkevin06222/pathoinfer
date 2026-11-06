@@ -35,12 +35,29 @@ trt = ["tensorrt"]
 triton = ["tritonclient[grpc]"]
 vllm-client = ["httpx"]
 serve = ["fastapi", "uvicorn"]
-convert = ["nvidia-modelopt", "llmcompressor"]
+# Model conversion: FP16 and ONNX Runtime INT8 (with [onnx]), ModelOpt INT8/FP8.
+# ModelOpt's own [onnx] extra pins onnxruntime-gpu<1.31 and onnx~=1.21, which clash with
+# the workspace; its ONNX quantiser's imports are listed here instead, at the versions
+# verified with onnxruntime-gpu 1.31.1 and onnx 1.23.2 (tests/convert).
+convert = [
+    "nvidia-modelopt>=0.48.0",
+    "onnx>=1.23.2",
+    "onnx-graphsurgeon>=0.6.1",
+    "onnxslim>=0.1.99",
+    "polygraphy>=0.53.6",
+    "onnxconverter-common>=1.16.0",
+    "onnxscript>=0.7.2",
+    "cupy-cuda13x>=14.2.0",
+    "lief>=1.0.0",
+    "cppimport>=26.4.17",
+]
+# LoRA merges and VLM weight quantisation (convert/vlm.py).
+vlm-convert = ["llmcompressor"]
 mlflow = ["mlflow-skinny"]
 hf = ["huggingface-hub"]
 # Only for io/interop.py's to_geodataframe(); never used by core or tests.
 geopandas = ["geopandas"]
-all = ["pathoinfer[onnx,trt,triton,vllm-client,serve,convert,mlflow,hf,geopandas]"]
+all = ["pathoinfer[onnx,trt,triton,vllm-client,serve,convert,vlm-convert,mlflow,hf,geopandas]"]
 
 # CUDA 13.0 builds of torch, as in pathotrain; uv needs one torch source per workspace.
 [tool.uv.sources]
@@ -97,8 +114,8 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# shapely 2 ships no type information; types-shapely would add it (not a dependency yet).
-module = ["shapely", "shapely.*"]
+# shapely 2 and ModelOpt ship no type information (types-shapely would add shapely's).
+module = ["shapely", "shapely.*", "modelopt.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

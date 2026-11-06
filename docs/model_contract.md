@@ -55,7 +55,8 @@ task.
 | `provenance.training_run_id` | str or null | null | Training run that produced the weights |
 | `provenance.calibration_set_hash` | str or null | null | Hash of the calibration tiles, for quantised variants |
 | `provenance.parent_model` | str or null | null | `name@version` this model was converted from |
-| `provenance.source_metadata` | object | `{}` | Producer metadata kept unchanged, e.g. the legacy `pathotrain` key |
+| `provenance.parity` | object or null | null | For converted models that passed `pathoinfer convert parity`: `reference` (`name@version`), `tile_set_hash`, `metrics` (worst class per metric), `tolerances`, `checked_at` |
+| `provenance.source_metadata` | object | `{}` | Producer metadata kept unchanged, e.g. the legacy `pathotrain` key; converters add `quantisation` or `tensorrt` settings |
 
 ### Segmentation
 
