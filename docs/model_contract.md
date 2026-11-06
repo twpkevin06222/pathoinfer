@@ -177,26 +177,19 @@ Fields the adapter fills from pathotrain's fixed conventions:
 | `output` (detection) | `boxes`, `scores`, `labels`; `xyxy`, `pixel`, `score_threshold: 0.5` |
 | `recommended_overlap` | `0.25` |
 
-## Gaps pathotrain's export must fill
+## What pathotrain's export writes
 
-To write a valid card, pathotrain's export must add these to what it records today:
+pathotrain's segmentation and detection exports write a model folder with a valid card
+(`model_card.json` beside the ONNX file and embedded under the `model_card` metadata
+key; the old `pathotrain` key stays as `provenance.source_metadata.pathotrain`):
 
-1. **Write the folder.** Write `model_card.json` beside the ONNX file, and embed the same
-   JSON under the `model_card` metadata key. Keep `pathotrain` as provenance.
-2. **Identity.** `schema_version: 1`, `name`, `version`, `framework: onnx`, `file`,
-   `precision`.
-3. **Resolution.** Always set `input.mpp`. A model trained on tile folders must take it as
-   an export argument, or the export must refuse.
-4. **Structured preprocessing.** `input.name`, `channel_order`, `layout`, `dtype`,
-   `normalisation.scale` and `icc`, replacing the free-text `input` string. `icc` must
-   reflect the training colour config.
-5. **Classes.** `{id, name, color}` per output index with real names, plus
-   `background_id` for segmentation (and classification when applicable). Today
-   unnamed classes are `"0"`, `"1"`, ... and there are no colours.
-6. **Structured outputs.** Replace the free-text `outputs` with the task's `output`
-   object: `activation` and `n_classes` for segmentation; tensor names, `box_format`,
-   `box_units` and a `score_threshold` for detection.
-7. **Overlap.** `recommended_overlap`, from the model's receptive field or validation.
-8. **Provenance.** `training_run_id` (the MLflow run id) when known.
-9. **Classification.** pathotrain has no tile classification export yet; it needs one
-   that writes a classification card.
+- `input.mpp` and `input.icc` come from the training config; models trained on tile
+  folders take them as `--mpp` and `--icc`/`--no-icc`, or the export refuses.
+- Classes have real names (`task.class_names` or the class map) and colours (tab20 or the
+  top-level `class_colors`); segmentation sets `background_id: 0`.
+- `recommended_overlap` is an export argument (`--overlap`, default 0.25), not derived
+  from the receptive field. `provenance.training_run_id` is the MLflow run id stored in
+  the checkpoint.
+
+Still open: pathotrain has no tile classification export; it needs one that writes a
+classification card.
