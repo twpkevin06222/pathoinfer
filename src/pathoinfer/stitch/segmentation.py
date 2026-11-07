@@ -95,7 +95,10 @@ class SegmentationStitcher:
         connectivity: Connectivity = 8,
         band_height: int | None = None,
         keep_labels: bool = False,
+        class_targets: dict[int, int] | None = None,
     ) -> None:
+        """``class_targets`` (``SegmentationOptions.class_remap``) moves each listed
+        class's probability to another class before the argmax."""
         if output_mpp < grid.mpp:
             raise ValueError(f"output_mpp {output_mpp} is finer than the model's {grid.mpp}")
         self.card, self.grid = card, grid
@@ -111,7 +114,10 @@ class SegmentationStitcher:
         self.tile = max(1, round(grid.tile_size / self.scale))
         self.window = gaussian_window(self.tile)
         self.band_height = band_height or 2 * self.tile
-        self.classes = [c.id for c in card.classes if c.id != card.background_id]
+        self.targets = class_targets or {}
+        self.classes = [
+            c.id for c in card.classes if c.id != card.background_id and c.id not in self.targets
+        ]
         self._pending = np.zeros(math.ceil(self.height / self.band_height), np.int64)
         for spec in grid.tiles:
             for band in self._bands_of(spec):
@@ -213,6 +219,9 @@ class SegmentationStitcher:
         top, rows = b * self.band_height, band.weight.shape[0]
         covered = band.weight > 0
         probs = np.divide(band.probs, band.weight, out=np.zeros_like(band.probs), where=covered)
+        for source, target in self.targets.items():  # dropped and merged classes
+            probs[target] += probs[source]
+            probs[source] = 0
         labels = probs.argmax(0).astype(np.int16)
         labels[~covered] = -1
         if self._labels is not None:

@@ -56,16 +56,23 @@ measurements, so its heatmaps use the same steps.
 
 `<slide>.labels.tiff` (segmentation, `outputs.tiff: true`) is a pyramidal TIFF at the
 segmentation's output resolution, with resolution tags set to its physical pixel size.
-Pixel values are class ids, -1 where no tile reached.
+Pixel values are class ids (8-bit), 255 where no tile reached.
 
-To look at it on its own, add it to the project as an image (File > Open): QuPath reads
-the pixel size from the resolution tags, so measurements are in microns. It is coarser
-than the slide (one pixel is `output_mpp` microns), so it does not share the slide's
-pixel coordinates.
+The file is a generic pyramidal TIFF: every level is its own image, which OpenSlide and
+fastslide read as a pyramid. QuPath opens plain TIFFs with Bio-Formats by default, which
+sees only the first level and warns that the image is not pyramidal (Bio-Formats reads
+TIFF pyramids only from OME-TIFF and scanner formats). Open it with QuPath's OpenSlide
+reader instead: in File > Project > Add images, set the image server to OpenSlide. In a
+script, pass `"--classname", "OpenslideServerBuilder"` to `buildServer`, as below.
+Checked with QuPath 0.7.0: Bio-Formats sees 1 level, OpenSlide all of them.
+
+QuPath reads the pixel size from the resolution tags, so measurements are in microns.
+The map is coarser than the slide (one pixel is `output_mpp` microns), so it does not
+share the slide's pixel coordinates.
 
 To overlay it on the slide, scale it by its level-0 pixels per pixel. The
 ImageDescription of the TIFF holds that factor as JSON (`level0_per_px`). A script for
-QuPath's script editor (Automate > Show script editor), not run here:
+QuPath's script editor (Automate > Show script editor); the overlay part is not run here:
 
 ```groovy
 import java.awt.geom.AffineTransform
@@ -76,7 +83,8 @@ import qupath.lib.images.servers.ImageServerProvider
 def path = '/path/to/slide_name-01.labels.tiff'
 def level0PerPx = 8.0  // "level0_per_px" in the TIFF's ImageDescription
 
-def server = ImageServerProvider.buildServer(path, BufferedImage)
+// OpenSlide reads the pyramid; QuPath's default (Bio-Formats) would see one level
+def server = ImageServerProvider.buildServer(path, BufferedImage, "--classname", "OpenslideServerBuilder")
 def viewer = getCurrentViewer()
 def transform = AffineTransform.getScaleInstance(level0PerPx, level0PerPx)
 def overlay = new ImageServerOverlay(viewer, server, transform)

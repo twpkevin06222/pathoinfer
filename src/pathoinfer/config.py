@@ -7,13 +7,13 @@ import glob
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from patchology import ArtifactConfig, Backend, TissueConfig
-from pathoinfer.registry.model_card import Byte, TileTask
+from pathoinfer.registry.model_card import Byte, SegmentationCard, TileTask
 
 
 class _Strict(BaseModel):
@@ -67,7 +67,15 @@ class SegmentationOptions(_Strict):
     on pixel edges. Holes under ``fill_holes_um2`` are filled (unless another class lies
     inside) and regions under ``min_area_um2`` dropped; ``.inf`` fills every hole.
     ``connectivity`` 8 keeps parts touching only at a pixel corner in one region (a
-    MultiPolygon meeting at that point); 4 makes them separate regions."""
+    MultiPolygon meeting at that point); 4 makes them separate regions.
+
+    ``background_classes`` (names) count as background. ``class_map`` renames and merges:
+    each key is an output class name, its value the model class it renames or a list of
+    model classes it merges, e.g. ``{tumor: invasive tumor, stroma: [inflamed stroma,
+    tumor-associated stroma]}``. Classes not named keep their names. Probabilities move
+    before each pixel's class is chosen: a pixel 30% stroma, 30% inflamed stroma and 40%
+    tumour becomes stroma (60%) when the two stromas merge. Every output then shows the
+    result: label map, polygons, summary, overlay."""
 
     output_mpp: float | None = Field(None, gt=0)
     simplify_px: float = Field(1.5, ge=0)
@@ -75,6 +83,57 @@ class SegmentationOptions(_Strict):
     min_area_um2: float = Field(0.0, ge=0)
     fill_holes_um2: float = Field(0.0, ge=0)
     connectivity: Literal[4, 8] = 8
+    background_classes: list[str] = []
+    class_map: dict[str, str | list[str]] = {}
+
+    def class_remap(self, card: SegmentationCard) -> "ClassRemap":
+        """What ``background_classes`` and ``class_map`` do to ``card``'s classes, by id.
+        A merged class keeps the id of its lowest-numbered source. Raises ValueError for
+        unknown or empty sources, a class used twice or named as the background, background
+        classes without a background, and output names that clash."""
+        ids = {c.name: c.id for c in card.classes}
+        groups = {
+            new: [old] if isinstance(old, str) else old for new, old in self.class_map.items()
+        }
+        empty = sorted(new for new, old in groups.items() if not old)
+        if empty:
+            raise ValueError(f"class_map entries without a source class: {empty}")
+        sources = [*self.background_classes, *(n for old in groups.values() for n in old)]
+        unknown = sorted({n for n in sources if n not in ids})
+        if unknown:
+            raise ValueError(
+                f"segmentation names unknown classes {unknown}; the model has {sorted(ids)}"
+            )
+        twice = sorted({n for n in sources if sources.count(n) > 1})
+        if twice:
+            raise ValueError(
+                f"classes used more than once in background_classes and class_map: {twice}"
+            )
+        background = card.background_id
+        if background is not None and any(ids[n] == background for n in sources):
+            raise ValueError("background_classes and class_map cannot use the background class")
+        if self.background_classes and background is None:
+            raise ValueError("background_classes needs a model with a background class")
+        unmapped = [c.name for c in card.classes if c.name not in sources]
+        names = [*groups, *unmapped]
+        clash = sorted({n for n in names if names.count(n) > 1})
+        if clash:
+            raise ValueError(f"class_map output names clash with other classes: {clash}")
+        targets = {ids[n]: background for n in self.background_classes if background is not None}
+        rename = {}
+        for new, old in groups.items():
+            keep, *rest = sorted(ids[n] for n in old)
+            targets |= {i: keep for i in rest}
+            rename[keep] = new
+        return ClassRemap(targets, rename)
+
+
+class ClassRemap(NamedTuple):
+    """``targets``: class id -> the id its probability moves to. ``names``: id -> its new
+    name, for the classes ``class_map`` names."""
+
+    targets: dict[int, int]
+    names: dict[int, str]
 
 
 class DetectionOptions(_Strict):

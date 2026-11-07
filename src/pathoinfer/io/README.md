@@ -47,7 +47,7 @@ complete. Each logs the path it wrote at INFO.
 |---|---|
 | `writers/geojson.py` | `write_geojson(path, objects, run, per_class=False)`: QuPath FeatureCollection (`objectType`, `classification`, `measurements`, `object_id`), run metadata in the top-level `properties`, coordinates rounded to 0.1 px. `.geojson` or `.geojson.gz`; `per_class` writes `<stem>.<class>.geojson[.gz]` per class. |
 | `writers/parquet.py` | `write_parquet(path, objects, run, geoparquet=False)`: objects table, WKB geometry, zstd, 100k-row row groups, run metadata under the key-value key `pathoinfer`. `write_summary(path, objects, run)`: one row per class with `count`, `mean_score`, `total_area_um2` and `tissue_area_um2`. |
-| `writers/tiff.py` | `write_tiff(path, raster, run)`: 2D raster as a tiled zlib BigTIFF with SubIFD pyramid levels, resolution tags and run metadata in the ImageDescription. |
+| `writers/tiff.py` | `write_tiff(path, raster, run)`: 2D raster as a tiled zlib BigTIFF pyramid, each level a top-level image (OpenSlide, fastslide and QuPath open it), resolution tags, label maps 8-bit (255 = no tile), run metadata as JSON in the ImageDescription. |
 | `objects.py` | `RunInfo`, `ObjectTable`. |
 | `interop.py` | `to_geodataframe(path)`: an objects table as a geopandas `GeoDataFrame`, behind the `[geopandas]` extra. The only module that imports geopandas. |
 

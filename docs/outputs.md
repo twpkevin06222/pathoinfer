@@ -145,14 +145,17 @@ run metadata once, and `classes` mapping each class name to its numbers.
 ## Heatmap TIFF
 
 `write_tiff(path, raster, run)` writes a 2D `Raster` (from `StitchResult.rasters`) as a
-pyramidal BigTIFF: the full raster is the main image, and SubIFDs halve it until it fits
+pyramidal BigTIFF that OpenSlide, fastslide and QuPath open: every level is its own
+top-level image, the full raster first, each next one halved until it fits
 one 256 px tile. Floats are area-averaged, integers (label maps) take the nearest pixel.
 Tiles are 256 px and zlib-compressed.
 
 Raster pixel `(col, row)` covers level-0 `scale * (col, row)` to `scale * (col + 1, row + 1)`.
 The resolution tags give each level's pixel size in pixels per centimetre
 (`1e4 / (slide_mpp * scale)` at full resolution), so a viewer that scales by physical size
-lays the heatmap over the slide. The ImageDescription is JSON:
+lays the heatmap over the slide (the readers report it as mpp). Label maps are 8-bit, class
+ids with 255 where no tile reached; OpenSlide reads 16-bit images as zeros. Float heatmaps
+stay float32, which OpenSlide and fastslide cannot read. The ImageDescription is JSON:
 `{"level0_per_px", "um_per_px", "run"}`. Rasters must start at the slide origin.
 
 ## Analysis

@@ -86,7 +86,7 @@ def test_segmentation_writes_every_output(tmp_path: Path, slides: Path) -> None:
     assert (objects["slide_id"] == result.slide_id).all()
     with tifffile.TiffFile(out / "slide_name-01.labels.tiff") as tif:
         labels = tif.series[0].levels[0].asarray()
-    assert set(np.unique(labels)) <= {-1, 0, 1}
+    assert labels.dtype == np.uint8 and set(np.unique(labels)) <= {0, 1, 255}  # 255: no tile
 
 
 def test_detection_reports_one_object_per_tile(tmp_path: Path, slides: Path) -> None:

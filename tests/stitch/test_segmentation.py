@@ -283,3 +283,141 @@ def test_small_objects_are_removed() -> None:
     assert len(stitch(shape).features) == 2
     (kept,) = stitch(shape, min_area_um2=100).features
     assert kept.measurements["area_um2"] > 1000
+
+
+def three_classes() -> SegmentationCard:
+    """background, tumor, necrosis."""
+    data = CARD | {
+        "input": CARD["input"] | {"tile_size": TILE, "mpp": MODEL_MPP},
+        "classes": [*CARD["classes"], {"id": 2, "name": "necrosis", "color": [0, 0, 200]}],
+        "output": CARD["output"] | {"n_classes": 3},
+    }
+    parsed = parse_card(data)
+    assert isinstance(parsed, SegmentationCard)
+    return parsed
+
+
+def stitch_probs(probs: Callable[[np.ndarray, np.ndarray], np.ndarray], **options: object):  # type: ignore[no-untyped-def]
+    """Stitch a 3-class model whose class probabilities at level-0 (x, y) are
+    ``probs(x, y)`` (shape (3, H, W)); logits are their logs, so softmax gives them back."""
+    from pathoinfer.config import SegmentationOptions
+
+    card = three_classes()
+    names = {k: options.pop(k) for k in ("background_classes", "class_map") if k in options}
+    targets = SegmentationOptions(**names).class_remap(card).targets  # type: ignore[arg-type]
+    stitcher = SegmentationStitcher(
+        card,
+        grid(),
+        output_mpp=OUTPUT_MPP,
+        keep_labels=True,
+        class_targets=targets,
+        **options,  # type: ignore[arg-type]
+    )
+    centres = (np.arange(TILE) + 0.5) * DOWNSAMPLE
+    specs = list(grid().tiles)
+    for start in range(0, len(specs), 16):
+        chunk = specs[start : start + 16]
+        out = np.stack(
+            [
+                np.log(
+                    probs(
+                        s.xm * DOWNSAMPLE + centres[None, :], s.ym * DOWNSAMPLE + centres[:, None]
+                    )
+                )
+                for s in chunk
+            ]
+        ).astype(np.float32)
+        stitcher.add(chunk, {"logits": torch.from_numpy(out)})
+    return stitcher.finalize()
+
+
+def split_vote(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Inside a disk: background 40%, tumor 30%, necrosis 30%. Background elsewhere."""
+    inside = disk(400)(x, y)
+    return np.stack(
+        [np.where(inside, 0.4, 0.98), np.where(inside, 0.3, 0.01), np.where(inside, 0.3, 0.01)]
+    )
+
+
+def test_merged_classes_add_their_probabilities() -> None:
+    assert stitch_probs(split_vote).features == []  # background wins alone, 40% to 30%
+    merged = stitch_probs(split_vote, class_map={"tumor": ["tumor", "necrosis"]})
+    (feature,) = merged.features  # tumor + necrosis = 60%: the disk is tumor
+    assert feature.class_name == "tumor"
+    assert feature.measurements["area_um2"] == pytest.approx(
+        math.pi * (400 * SLIDE_MPP) ** 2, rel=0.03
+    )
+    labels = merged.rasters["labels"]
+    centre = round(CORNER / labels.scale)
+    assert labels.array[centre, centre] == 1 and not (labels.array == 2).any()
+
+
+def test_background_classes_become_background() -> None:
+    def necrosis_disk(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        inside = disk(400)(x, y)
+        return np.stack(
+            [
+                np.where(inside, 0.05, 0.98),
+                np.full(inside.shape, 0.01),
+                np.where(inside, 0.94, 0.01),
+            ]
+        )
+
+    assert [f.class_name for f in stitch_probs(necrosis_disk).features] == ["necrosis"]
+    dropped = stitch_probs(necrosis_disk, background_classes=["necrosis"])
+    assert dropped.features == []
+    assert set(np.unique(dropped.rasters["labels"].array)) == {0}
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"background_classes": ["stroma"]}, "unknown classes"),
+        ({"class_map": {"lesion": ["tumor", "stroma"]}}, "unknown classes"),
+        ({"class_map": {"lesion": []}}, "without a source"),
+        (
+            {"background_classes": ["necrosis"], "class_map": {"x": ["tumor", "necrosis"]}},
+            "more than once",
+        ),
+        ({"class_map": {"a": "tumor", "b": ["tumor", "necrosis"]}}, "more than once"),
+        ({"class_map": {"lesion": ["necrosis", "background"]}}, "background class"),
+        ({"class_map": {"necrosis": "tumor"}}, "clash"),  # two classes would be "necrosis"
+    ],
+)
+def test_class_options_are_checked_against_the_card(options: dict, message: str) -> None:  # type: ignore[type-arg]
+    from pathoinfer.config import SegmentationOptions
+
+    with pytest.raises(ValueError, match=message):
+        SegmentationOptions(**options).class_remap(three_classes())
+
+
+def test_class_map_renames_and_merges_into_the_lowest_id() -> None:
+    from pathoinfer.config import SegmentationOptions
+
+    rename = SegmentationOptions(class_map={"cancer": "tumor"}).class_remap(three_classes())
+    assert rename == ({}, {1: "cancer"})
+    merge = SegmentationOptions(class_map={"lesion": ["necrosis", "tumor"]}).class_remap(
+        three_classes()
+    )
+    assert merge == ({2: 1}, {1: "lesion"})
+    keep = SegmentationOptions(class_map={"tumor": ["tumor", "necrosis"]}).class_remap(
+        three_classes()
+    )
+    assert keep == ({2: 1}, {1: "tumor"})  # merging into a class may keep its name
+
+
+def test_run_info_leaves_out_moved_classes_and_renames() -> None:
+    from pathoinfer.io.objects import RunInfo
+
+    run = RunInfo.create(
+        three_classes(),
+        grid(),
+        "m",
+        OUTPUT_MPP,
+        colors={"lesion": (1, 2, 3)},
+        exclude={2},
+        rename={1: "lesion"},
+    )
+    assert [(c.id, c.name, c.color) for c in run.classes] == [(1, "lesion", (1, 2, 3))]
+    with pytest.raises(ValueError, match="unknown classes"):
+        RunInfo.create(three_classes(), grid(), "m", OUTPUT_MPP, colors={"lesion": (1, 2, 3)})
