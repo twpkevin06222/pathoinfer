@@ -143,8 +143,9 @@ Engine runs for classification are not wired yet: the writers take objects from 
 ## Shared vectoriser
 
 Segmentation and heatmap regions both use `post/vectorise.py`: `regions` (contours with
-holes on pixel edges), `merge` (across band seams), `fill_holes`, `to_feature`
-(simplify, smooth, scale to level 0, measure) and `vectorise` (all of them on one whole
+holes on pixel edges), `merge` (across band seams), `fill_holes`, `to_features`
+(simplify and smooth every border once so neighbours share it, scale to level 0,
+measure) and `vectorise` (all of them on one whole
 mask). Regions are exact pixel unions; with `connectivity` 8 (default) parts that touch
 only at a pixel corner are one region, with 4 separate regions. `post/README.md` has
 the details and measurements.

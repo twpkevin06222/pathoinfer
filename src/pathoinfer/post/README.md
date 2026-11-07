@@ -9,7 +9,7 @@ rules.
 |---|---|
 | `vectorise.py` | Masks to level-0 polygons with holes; used by `stitch/segmentation.py` and `stitch/heatmap.py` |
 | `nms.py` | Empty stub. Cross-tile NMS for detections lives in `stitch/detection.py` (`_nms`) |
-| `smoothing.py` | Empty stub. Polygon smoothing is `vectorise.chaikin`; heatmap smoothing is in `stitch/heatmap.py` |
+| `smoothing.py` | Empty stub. Polygon smoothing is `vectorise.shape_borders`; heatmap smoothing is in `stitch/heatmap.py` |
 
 ## Usage
 
@@ -50,11 +50,32 @@ Each step is public, so a stitcher can run them on band pieces and merge in betw
 |---|---|
 | `regions(mask, values, class_id, top, connectivity=8)` | One `Piece` per connected region, with holes, in mask pixels (`top` offsets the rows of a band): the exact union of its pixels. `Piece` keeps the sum of `values` and the pixel count for `mean_probability`. |
 | `merge(pieces, connectivity=8)` | Unions same-class pieces that touch (a region cut by band boundaries): along an edge, or with 8 also at a corner. |
-| `fill_holes(pieces, max_px)` | Fills holes under `max_px` mask px² unless another class's region lies inside, and drops same-class islands inside the filled holes. |
-| `to_feature(piece, name, level0_per_px=..., slide_mpp=..., origin=..., simplify_px=1.5, smooth=2, min_area_um2=0)` | Drops collinear vertices, simplifies (Douglas-Peucker, topology kept), smooths (edges split to at most 4 px, `chaikin`, then simplified at 0.1 px), makes valid, scales to level 0, rounds to 0.1 px, drops regions under `min_area_um2`, and measures `area_um2`, `perimeter_um` and `mean_probability`. |
+| `fill_holes(pieces, max_px)` | Fills holes under `max_px` mask px² unless another class has a polygon inside (also one that leaves the hole through a pixel corner), and drops same-class islands inside the filled holes. Returns the pieces and the filled holes (to paint a label map the same way). |
+| `to_features(pieces, names, level0_per_px=..., slide_mpp=..., origin=..., simplify_px=1.5, smooth=2)` | All pieces together: `shape_borders`, then make valid, scale to level 0, round to 0.1 px, and measure `area_um2`, `perimeter_um` and `mean_probability`. `names` maps class ids to names. |
+| `shape_borders(geometries, simplify_px, rounds)` | Simplifies (Douglas-Peucker) and smooths (edges split to at most 4 px, `chaikin`, then simplified at 0.1 px) every border once, so neighbouring regions keep one shared line (see below). |
 | `vectorise(mask, values, class_id, name, ...)` | All of the above on one whole mask, plus `fill_holes_um2` and `connectivity`. |
-| `chaikin(geometry, rounds)` | Chaikin corner cutting: each round doubles the vertices and cuts a quarter of each edge from every corner. `to_feature` splits edges to at most 4 px first, so a cut is at most about a pixel. |
+| `chaikin(points, rounds, closed=...)` | Chaikin corner cutting on a polyline: each round doubles the vertices and cuts a quarter of each edge from every corner; an open line keeps its ends. Edges are split to at most 4 px first, so a cut is at most about a pixel. |
 | `polygonal(geometry)` | The Polygon or MultiPolygon parts of a geometry, or None. |
+
+## Shared borders
+
+Where two classes meet, both polygons must use the same line, or the outlines overlap
+and leave gaps. Simplifying and smoothing each polygon on its own moves each copy of
+a shared border differently: on a real slide that left 1% of the polygon area
+overlapping. `shape_borders` works on the borders instead:
+
+1. Edges are split at every pixel, so a border has the same vertices from both sides.
+2. Borders are cut into arcs at junctions: vertices with other than two distinct edges
+   (three regions meeting, or regions touching at a pixel corner). A border with no
+   junction is a loop (an island and the hole around it).
+3. Each distinct arc is simplified and smoothed once with its ends fixed, in a canonical
+   direction (from its smaller end; a loop from its smallest vertex), and every region
+   on it takes that result. The steps are symmetric in floating point.
+4. Arcs about a pixel apart, such as both sides of a 1 px strand, can still cross after
+   simplifying. An arc that touches another anywhere but at their shared ends steps back
+   to smoothing only, then to its exact pixel line, until no arcs cross.
+
+Polygons then overlap only by the 0.1 px rounding (`tests/post/test_vectorise.py`).
 
 ## How outlines are traced
 

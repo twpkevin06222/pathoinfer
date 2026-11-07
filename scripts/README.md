@@ -6,7 +6,7 @@ Each script's docstring has the details; `--help` lists every option.
 
 | Script | Question it answers |
 |---|---|
-| `qc_overlay.py` | Do a slide's outputs line up with the tissue? |
+| `qc_overlay.py` | What did a run find, and does it line up with the tissue? |
 | `perf_report.py` | Which stage limits a run on this slide and config? |
 | `bench_read.py` | How fast are tiles read, per number of reader processes? |
 | `bench_infer.py` | How fast does a model run, per runtime and precision? |
@@ -20,21 +20,19 @@ readers start from a fresh interpreter (`forkserver`) that re-imports the script
 uv run python scripts/qc_overlay.py slide_name-01.svs outputs/slide_name-01.geojson.gz
 ```
 
-Writes `<name>.qc.png` next to the GeoJSON (or `--out`): the slide thumbnail with every
-object in its class colour, and three crops centred on random points of object outlines,
-where misalignment shows first. The crops are marked 1-3 on the thumbnail.
+Writes `<name>.qc.png` next to the GeoJSON (or `--out`): the whole slide read at
+`--mpp`, with every object filled in its class colour at `--alpha` opacity and outlined
+at full opacity, and a legend of the classes. Detections (points) are circles.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--downsample` | `1.0` | Crop zoom in level-0 px per crop px; 1 is full resolution |
-| `--crop` | `512` | Crop size, px |
-| `--thumbnail` | `2048` | Thumbnail size, px |
-| `--seed` | `0` | Which outline points the crops show |
+| `--mpp` | `6.0` | Image resolution, µm per px (the slide must record its own) |
+| `--alpha` | `0.4` | Fill opacity: 0 shows only outlines, 1 hides the tissue |
 
-Outlines are drawn on pixel edges, as the coordinates mean, so an outline that follows a
-tissue edge in the crops is aligned to the pixel. Use a model whose output you can
-predict from the image (a threshold model works) to check alignment itself: a model that
-labels glass and tissue alike outlines only the processed tiles.
+At 6 mpp a 40 x 30 mm slide is about 6700 x 5000 px. Outlines are drawn on pixel
+edges, as the coordinates mean. To check alignment itself, use a model whose output you
+can predict from the image (a threshold model works): a model that labels glass and
+tissue alike outlines only the processed tiles.
 
 ## perf_report.py
 

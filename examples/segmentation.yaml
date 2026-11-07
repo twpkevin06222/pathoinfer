@@ -41,7 +41,10 @@ outputs:
   gzip: true
   per_class: false                # one GeoJSON per class
   parquet: true                   # <slide>.objects.parquet and <slide>.summary.parquet
+  summary_format: parquet         # or json: <slide>.summary.json, class name -> numbers
   geoparquet: false               # GeoParquet metadata via DuckDB spatial (docs/outputs.md)
   tiff: true                      # <slide>.labels.tiff, the label map as a pyramidal TIFF
+  overlay: true                   # <slide>.overlay.png: the slide with the polygons filled
+  overlay_mpp: 6.0                # its resolution, µm per px
 
 class_colors: {}                  # e.g. {tumor: [255, 0, 0]}; default: the card's colours

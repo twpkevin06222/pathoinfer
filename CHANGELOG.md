@@ -9,6 +9,20 @@ config or output formats; the entry says so.
 
 ### Added
 
+- Each slide ends with a readable summary in the log: time per stage with its share of
+  the run, the main process's CPU (average cores used) and peak RAM, and on a local GPU
+  its utilisation during inference (mean and max) and peak memory in use on the device,
+  sampled through NVML every 0.5 s (TensorRT and ONNX Runtime memory included). Reader
+  processes are not measured. The `slide=...` line gains `cpu_s`, `peak_gpu_util_mean`,
+  `peak_gpu_util_max` and `peak_gpu_used_mb`. New core dependency: `nvidia-ml-py`
+  (machines without an NVIDIA driver skip the GPU line).
+- Segmentation runs write `<slide>.overlay.png`: the whole slide at `outputs.overlay_mpp`
+  (default 6) with every class filled at 40% opacity, outlined, and a legend
+  (`io.writers.overlay`). On by default; `outputs.overlay: false` turns it off.
+- `outputs.summary_format: json` writes the per-class summary as `<slide>.summary.json`
+  for every task: the run metadata once and `classes` mapping each class name to
+  `class_id`, `count`, `mean_score` and `total_area_um2`. The default stays Parquet.
+  Either new option changes the settings hash, so finished slides run again once.
 - `pathoinfer convert fp16|ptq|trt|parity`:
   - FP16 conversion with ONNX Runtime's converter; I/O dtypes and the FP32 op block list
     are configurable.
@@ -90,6 +104,43 @@ config or output formats; the entry says so.
 - Extras: `[convert]` is now NVIDIA ModelOpt (>= 0.48), `onnx` and the helpers
   ModelOpt's ONNX quantiser imports, listed without ModelOpt's own `[onnx]` pins so
   onnxruntime-gpu 1.31 stays; `llmcompressor` moved to the new `[vlm-convert]`.
+
+- `scripts/qc_overlay.py` draws like the run's overlay (`io.writers.overlay.render`): the
+  whole slide at `--mpp` (default 6), objects filled at `--alpha` (default 0.4) with
+  outlines and a class legend. The thumbnail and crops are gone, and `--thumbnail`,
+  `--crop`, `--downsample` and `--seed` with them.
+
+### Fixed
+
+- Segmentation post-processing is about twice as fast (95 s to 49 s on a 29,000-tile
+  slide at 6 mpp): band pieces merge with a coverage union, filling a hole drops its ring
+  instead of a union with the whole region, and only invalid polygons are repaired.
+  Outputs are unchanged.
+- A simplified border could run through a junction where only other borders end, making
+  a ring touch itself; repairing that took 25 s on one large stroma polygon. Borders may
+  now touch only at ends they share.
+- Segmentation polygons of neighbouring classes no longer overlap. Each polygon was
+  simplified and smoothed on its own, so the two copies of a shared border moved apart
+  (1% of the polygon area overlapped on a real slide); borders are now shaped once per
+  arc between junctions (`post.vectorise.shape_borders`). Polygon outputs change
+  slightly; the synthetic ellipse's area moves by 0.04%. `to_feature` is replaced by
+  `to_features`, which takes all pieces at once.
+- The segmentation label TIFF now shows the same clean-up as the polygons: filled holes
+  take their class and regions under `min_area_um2` become background. It was the raw
+  argmax, so it held objects the GeoJSON did not. Small regions are decided once, on
+  their exact pixel area; a second check after smoothing, which dropped regions whose
+  smoothed outline dipped under the threshold, is gone, so slightly more small polygons
+  are kept. `fill_holes` returns the filled holes too, and `to_features` takes no
+  `min_area_um2`.
+- `fill_holes` no longer fills a hole over another class's region that leaves the hole
+  through a pixel corner (with `connectivity` 8), which made classes overlap.
+- `convert fp16` converts models over 2 GB (weights in a file beside the graph); it
+  failed with "Unable to parse proto" in ONNX's in-memory shape inference. Shapes are now
+  inferred from the file, and a large FP16 model is saved as `model.onnx` plus
+  `model.onnx.data`.
+- `convert trt` builds models whose weights sit in a file beside the graph (ONNX
+  models over 2 GB); it failed with "Failed to import initializer". The plan cache key
+  now covers those weights, so a retrained model no longer reuses the old plan.
 
 ## [0.1.0] - 2026-11-06
 

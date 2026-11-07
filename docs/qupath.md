@@ -12,7 +12,7 @@ slide with `scripts/qc_overlay.py`.
 
 - Check alignment outside QuPath first:
   `uv run python scripts/qc_overlay.py SLIDE OUTPUT.geojson.gz` draws the objects on the
-  thumbnail and on three full-resolution crops.
+  whole slide at 6 mpp (`--mpp` for finer).
 - Open the slide in QuPath with the same file pathoinfer read. Formats where a reader
   crops to the scanned area (for example MRXS) can shift objects by that area's offset;
   if the overlay script shows them aligned but QuPath does not, compare the image size

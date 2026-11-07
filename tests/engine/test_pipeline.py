@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import polars as pl
 import pytest
@@ -16,6 +17,7 @@ import tifffile
 import torch
 import yaml
 
+from patchology import open_slide
 from pathoinfer.cli import main
 from pathoinfer.config import RunConfig
 from pathoinfer.engine.pipeline import load, run_batch, run_slide
@@ -65,8 +67,14 @@ def test_segmentation_writes_every_output(tmp_path: Path, slides: Path) -> None:
         "slide_name-01.objects.parquet",
         "slide_name-01.summary.parquet",
         "slide_name-01.labels.tiff",
+        "slide_name-01.overlay.png",
         "slide_name-01.done.json",
     } <= names
+    overlay = cv2.imread(str(out / "slide_name-01.overlay.png"))
+    with open_slide(slides / "slide_name-01.tiff") as slide:
+        width, height = slide.dimensions
+        level0_per_px = 6.0 / slide.mpp[0]
+    assert overlay.shape[:2] == (int(height / level0_per_px), int(width / level0_per_px))
     assert any(n.startswith("batch-") for n in names) and any(n.startswith("run-") for n in names)
     geometries = [
         shapely.from_geojson(json.dumps(f["geometry"]))
@@ -193,3 +201,35 @@ def test_cli_reports_bad_configs(
     path.write_text("task: segmentation\nmodel: m\nslides: s\nloader: {workers: 2}\n")
     assert main(["validate", str(path)]) == 1
     assert "loader.workers" in caplog.text
+
+
+def test_finished_summary_reports_time_cpu_and_memory() -> None:
+    from pathoinfer.engine.pipeline import finished_summary
+    from pathoinfer.engine.scheduler import Timings
+
+    timings = Timings({"infer": 60.0, "stitch_finalize": 30.0, "write": 10.0})
+    gpu = {"gpu_util_mean": 87.4, "gpu_util_max": 100.0, "gpu_used_mb": 8192.0}
+    peak = {"rss_mb": 2048.0, "cuda_mb": 1024.0} | gpu
+    lines = finished_summary("s.svs", 100.0, 1000, 16.7, 42, timings, 150.0, peak).splitlines()
+    assert lines[0] == "finished s.svs in 100.0 s: 1000 tiles at 17 tiles/s, 42 objects"
+    assert lines[1].split(maxsplit=1)[1].startswith("infer 60.0 s (60%) | stitch finalize 30.0 s")
+    assert "1.5 cores on average (150 s; readers not counted)" in lines[2]
+    assert lines[3].endswith("RAM peak 2.0 GB (main process); GPU 1.0 GB peak by torch")
+    assert lines[4].endswith(
+        "busy 87% on average (max 100%) during inference; 8.0 GB peak in use on the device"
+    )
+    no_gpu = finished_summary("s.svs", 1.0, 1, 1.0, 0, timings, 0.5, {"rss_mb": 1.0})
+    assert "GPU" not in no_gpu
+
+
+@pytest.mark.gpu
+def test_gpu_sampler_sees_the_device_while_it_runs() -> None:
+    from pathoinfer.engine.scheduler import GpuSampler
+
+    with GpuSampler(0, interval_s=0.05) as sampler:
+        x = torch.randn(4096, 4096, device="cuda")
+        for _ in range(50):
+            x = x @ x / 4096
+        torch.cuda.synchronize()
+    assert sampler.result["gpu_used_mb"] > 0
+    assert 0 <= sampler.result["gpu_util_mean"] <= sampler.result["gpu_util_max"] <= 100

@@ -9,8 +9,9 @@ longitude and latitude, so do not load these files into GIS tools as geographic 
 |---|---|---|
 | `<slide>.geojson[.gz]` | `io.writers.geojson.write_geojson` | Viewing in QuPath and other viewers |
 | `<slide>.objects.parquet` | `io.writers.parquet.write_parquet` | Analysis, one row per object |
-| `<slide>.summary.parquet` | `io.writers.parquet.write_summary` | Analysis, one row per class |
-| `<slide>.<name>.tiff` | `io.writers.tiff.write_tiff` | Heatmaps and label maps over the slide |
+| `<slide>.summary.parquet` or `.json` | `io.writers.parquet.write_summary` | Analysis, one row per class (`summary_format`) |
+| `<slide>.<name>.tiff` | `io.writers.tiff.write_tiff` | Heatmaps and label maps over the slide. The segmentation label map has the same clean-up as the polygons (holes filled, small regions removed) |
+| `<slide>.overlay.png` | `io.writers.overlay.write_overlay` | Segmentation: the whole slide at `overlay_mpp` (default 6) with each class filled at 40% opacity, outlined, and a legend |
 
 Every writer takes a `RunInfo` and, except the TIFF writer, an `ObjectTable` (both in
 `io.objects`):
@@ -123,6 +124,23 @@ One row per class, classes without objects included.
 | `mean_score` | Mean detection score; null for segmentation |
 | `total_area_um2` | Sum of `area_um2` (for segmentation, the class's tissue area) |
 | `tissue_area_um2` and the other run metadata fields | Repeated on every row |
+
+With `outputs.summary_format: json` the summary is `<slide>.summary.json` instead: the
+run metadata once, and `classes` mapping each class name to its numbers.
+
+```json
+{
+  "slide_id": "f9b748d9...",
+  "slide_name": "slide_name-01.svs",
+  "task": "segmentation",
+  "tissue_area_um2": 33053697.7,
+  "...": "the other run metadata fields",
+  "classes": {
+    "tumour": {"class_id": 1, "count": 1704, "mean_score": null, "total_area_um2": 12949742.9},
+    "stroma": {"class_id": 2, "count": 1956, "mean_score": null, "total_area_um2": 12838110.4}
+  }
+}
+```
 
 ## Heatmap TIFF
 

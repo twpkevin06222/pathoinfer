@@ -13,6 +13,7 @@ from pathoinfer.io.writers.parquet import (
     META_KEY,
     objects_frame,
     pixel_crs,
+    summary_frame,
     write_parquet,
     write_summary,
 )
@@ -131,3 +132,19 @@ def test_geoparquet_metadata_names_the_pixel_crs(
     decoded = shapely.from_wkb(frame["geometry"].to_numpy())
     assert shapely.equals_exact(decoded, seg_objects.geometry, tolerance=0).all()
     assert_frame_equal(frame, objects_frame(seg_objects, seg_run), check_dtypes=False)
+
+
+def test_summary_as_json_maps_class_names_to_counts(
+    tmp_path: Path, det_objects: ObjectTable, det_run: RunInfo
+) -> None:
+    path = write_summary(tmp_path / "summary.json", det_objects, det_run)
+    summary = json.loads(path.read_text())
+    frame = summary_frame(det_objects, det_run)
+    assert list(summary["classes"]) == frame["class_name"].to_list()
+    for row in frame.iter_rows(named=True):
+        assert summary["classes"][row["class_name"]] == {
+            k: row[k] for k in ("class_id", "count", "mean_score", "total_area_um2")
+        }
+    assert summary["slide_id"] == det_run.slide_id
+    assert summary["tissue_area_um2"] == det_run.tissue_area_um2
+    assert not list(tmp_path.glob("*.partial"))

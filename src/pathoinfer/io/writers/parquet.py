@@ -1,4 +1,5 @@
-"""Parquet tables for analysis: one row per object, and one summary row per class.
+"""Parquet tables for analysis: one row per object, and one summary row per class (or
+the summary as JSON: ``write_summary`` to a ``.json`` path).
 
 The objects table is a Polars frame built straight from NumPy columns. Geometry is WKB in
 level-0 pixels. Every file also stores the run metadata as JSON under the Parquet
@@ -115,10 +116,24 @@ def summary_frame(objects: ObjectTable, run: RunInfo) -> pl.DataFrame:
 
 @log_call
 def write_summary(path: str | Path, objects: ObjectTable, run: RunInfo) -> Path:
+    """``summary_frame`` as Parquet, or as JSON when ``path`` ends in ``.json``: the run
+    metadata once, and ``classes`` mapping each class name to ``class_id``, ``count``,
+    ``mean_score`` and ``total_area_um2``."""
     path = Path(path)
-    summary_frame(objects, run).write_parquet(
-        path, compression="zstd", metadata={META_KEY: json.dumps(run.to_dict())}
-    )
+    frame = summary_frame(objects, run)
+    if path.suffix == ".json":
+        meta = {k: v for k, v in run.to_dict().items() if k != "classes"}
+        stats = ["class_id", "count", "mean_score", "total_area_um2"]
+        classes = {
+            row["class_name"]: {k: row[k] for k in stats} for row in frame.iter_rows(named=True)
+        }
+        partial = path.with_name(path.name + ".partial")
+        partial.write_text(json.dumps({**meta, "classes": classes}, indent=2) + "\n")
+        os.replace(partial, path)
+    else:
+        frame.write_parquet(
+            path, compression="zstd", metadata={META_KEY: json.dumps(run.to_dict())}
+        )
     logger.info("wrote {}", path)
     return path
 

@@ -20,14 +20,23 @@ from loguru import logger
 from patchology import open_slide
 from pathoinfer._logging import add_file_sink, log_call
 from pathoinfer.config import RunConfig
-from pathoinfer.engine.scheduler import STITCH_QUEUE, Progress, Timings, peak_memory_mb, stream
+from pathoinfer.engine.scheduler import (
+    STITCH_QUEUE,
+    GpuSampler,
+    Progress,
+    Timings,
+    cpu_seconds,
+    peak_memory_mb,
+    stream,
+)
 from pathoinfer.io.objects import ObjectTable, RunInfo
 from pathoinfer.io.writers.geojson import write_geojson
+from pathoinfer.io.writers.overlay import write_overlay
 from pathoinfer.io.writers.parquet import write_parquet, write_summary
 from pathoinfer.io.writers.tiff import write_tiff
 from pathoinfer.registry.loader import load_model
 from pathoinfer.registry.model_card import DetectionCard, ModelCard, SegmentationCard
-from pathoinfer.runtime.base import Runtime
+from pathoinfer.runtime.base import Runtime, resolve_device
 from pathoinfer.runtime.factory import make_runtime
 from pathoinfer.stitch.base import Stitcher, StitchThread
 from pathoinfer.stitch.detection import DetectionStitcher
@@ -87,10 +96,53 @@ def output_paths(cfg: RunConfig, slide: Path) -> dict[str, Path]:
         paths["geojson"] = out.dir / f"{stem}.geojson{'.gz' if out.gzip else ''}"
     if out.parquet:
         paths["objects"] = out.dir / f"{stem}.objects.parquet"
-        paths["summary"] = out.dir / f"{stem}.summary.parquet"
+        paths["summary"] = out.dir / f"{stem}.summary.{out.summary_format}"
     if out.tiff and cfg.task == "segmentation":
         paths["labels"] = out.dir / f"{stem}.labels.tiff"
+    if out.overlay and cfg.task == "segmentation":
+        paths["overlay"] = out.dir / f"{stem}.overlay.png"
     return paths
+
+
+def finished_summary(
+    name: str,
+    wall: float,
+    tiles: int,
+    tiles_per_s: float,
+    objects: int,
+    timings: Timings,
+    cpu: float,
+    peak: dict[str, float],
+) -> str:
+    """A slide's run for people: time per stage (share of the wall time), the main
+    process's CPU (average cores in use) and peak memory. Reader processes are not
+    measured."""
+    stages = sorted(timings.seconds.items(), key=lambda kv: -kv[1])
+    time_line = " | ".join(
+        f"{k.replace('_', ' ')} {v:.1f} s ({100 * v / max(wall, 1e-9):.0f}%)" for k, v in stages
+    )
+    cores = cpu / max(wall, 1e-9)
+
+    def gb(mb: float) -> str:
+        return f"{mb / 1024:.1f} GB"
+
+    memory = f"RAM peak {gb(peak['rss_mb'])} (main process)"
+    if "cuda_mb" in peak:
+        memory += f"; GPU {gb(peak['cuda_mb'])} peak by torch"
+    gpu = ""
+    if "gpu_util_mean" in peak:
+        gpu = (
+            f"\n  GPU     busy {peak['gpu_util_mean']:.0f}% on average "
+            f"(max {peak['gpu_util_max']:.0f}%) during inference; "
+            f"{gb(peak['gpu_used_mb'])} peak in use on the device"
+        )
+    return (
+        f"finished {name} in {wall:.1f} s: {tiles} tiles at {tiles_per_s:.0f} tiles/s, "
+        f"{objects} objects\n"
+        f"  time    {time_line}\n"
+        f"  CPU     {cores:.1f} cores on average ({cpu:.0f} s; readers not counted)\n"
+        f"  memory  {memory}{gpu}"
+    )
 
 
 def marker_path(cfg: RunConfig, slide: Path) -> Path:
@@ -117,6 +169,7 @@ def run_slide(
     model = model or load(cfg)
     card = model.card
     start = time.perf_counter()
+    cpu_start = cpu_seconds()
     timings = Timings()
     with timings.stage("grid"), open_slide(path, cfg.tiling.backend) as slide:
         overlap = cfg.tiling.overlap
@@ -142,9 +195,16 @@ def run_slide(
         prefetch_factor=cfg.loader.prefetch_factor,
         persistent_workers=False,
     )
+    device = resolve_device(cfg.runtime.device)
+    on_gpu = device.type == "cuda" and cfg.runtime.triton_url is None  # Triton's GPU is remote
+    gpu = GpuSampler(device.index or 0)
     try:
         thread = StitchThread(make_stitcher(cfg, card, grid, output_mpp), STITCH_QUEUE)
-        result, tiles = stream(loader, model.runtime, thread, timings, on_progress)
+        if on_gpu:
+            with gpu:
+                result, tiles = stream(loader, model.runtime, thread, timings, on_progress)
+        else:
+            result, tiles = stream(loader, model.runtime, thread, timings, on_progress)
     finally:
         loader.dataset.close()  # type: ignore[attr-defined]  # TileDataset; open with 0 workers
 
@@ -161,6 +221,11 @@ def run_slide(
             written.append(write_summary(paths["summary"], objects, run))
         if "labels" in paths:
             written.append(write_tiff(paths["labels"], result.rasters["labels"], run))
+        if "overlay" in paths:
+            with open_slide(path, cfg.tiling.backend) as slide:
+                written.append(
+                    write_overlay(paths["overlay"], slide, objects, run, cfg.outputs.overlay_mpp)
+                )
     marker = {
         "settings_hash": model.settings_hash,
         "slide": str(path),
@@ -171,19 +236,27 @@ def run_slide(
     marker_path(cfg, path).write_text(json.dumps(marker, indent=2) + "\n")
 
     wall = time.perf_counter() - start
-    peak = peak_memory_mb()
+    peak = peak_memory_mb() | gpu.result
+    cpu = cpu_seconds() - cpu_start
+    tiles_per_s = tiles / max(sum(timings.seconds.get(k, 0.0) for k in STREAM_STAGES), 1e-9)
     stages = " ".join(f"{k}_s={v:.2f}" for k, v in timings.seconds.items())
     memory = " ".join(f"peak_{k}={v:.0f}" for k, v in peak.items())
     logger.info(
-        "slide={} slide_id={} tiles={} tiles_per_s={:.0f} objects={} wall_s={:.1f} {} {}",
+        "slide={} slide_id={} tiles={} tiles_per_s={:.0f} objects={} wall_s={:.1f} {} "
+        "cpu_s={:.0f} {}",
         path.name,
         grid.slide_id,
         tiles,
-        tiles / max(sum(timings.seconds.get(k, 0.0) for k in STREAM_STAGES), 1e-9),
+        tiles_per_s,
         len(objects),
         wall,
         stages,
+        cpu,
         memory,
+    )
+    logger.info(
+        "{}",
+        finished_summary(path.name, wall, tiles, tiles_per_s, len(objects), timings, cpu, peak),
     )
     return RunResult(
         path,

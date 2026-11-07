@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 import shapely
@@ -164,6 +165,24 @@ def test_label_raster_has_a_level0_transform() -> None:
     assert labels.scale == OUTPUT_MPP / SLIDE_MPP
     row = col = round(CORNER / labels.scale)
     assert labels.array[row, col] == 1 and labels.array[0, 0] == 0
+
+
+def test_label_raster_shows_the_same_clean_up_as_the_polygons() -> None:
+    ring, speck = annulus(20, 300), disk(12)  # hole: 79 um2; speck: 28 um2
+    shape = lambda x, y: ring(x, y) | speck(x + 900, y)
+
+    def label_at(result: StitchResult, x: float) -> int:
+        labels = result.rasters["labels"]
+        return int(labels.array[int(CORNER / labels.scale), int(x / labels.scale)])
+
+    raw = stitch(shape, keep_labels=True)
+    assert (label_at(raw, CORNER), label_at(raw, CORNER - 900)) == (0, 1)
+    clean = stitch(shape, keep_labels=True, fill_holes_um2=500, min_area_um2=50)
+    assert (label_at(clean, CORNER), label_at(clean, CORNER - 900)) == (1, 0)
+    (feature,) = clean.features  # the ring, without its hole; the speck is gone
+    assert len(feature.geometry.interiors) == 0
+    count, _ = cv2.connectedComponents((clean.rasters["labels"].array == 1).astype(np.uint8))
+    assert count - 1 == len(clean.features)
 
 
 def test_output_mpp_finer_than_the_model_is_rejected() -> None:
