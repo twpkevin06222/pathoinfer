@@ -72,7 +72,7 @@ from pathoinfer.registry.loader import (
     load_vlm,
     validate_folder,
 )
-from pathoinfer.registry.model_card import VqaCard
+from pathoinfer.registry.model_card import SegmentationCard, VqaCard
 from pathoinfer.tiling.slide_id import slide_id
 
 LEVELS = ["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL", "ALL"]
@@ -257,12 +257,18 @@ def _config_problems(cfg: RunConfig) -> list[str]:
         problems.append(f"config task is {cfg.task}, but {cfg.model} is a {card.task} model")
     if card.task == "classification":
         problems.append("classification runs land in v0.2")
-    unknown = set(cfg.class_colors) - {c.name for c in card.classes}
+    renamed = set(cfg.segmentation.class_map) if card.task == "segmentation" else set()
+    unknown = set(cfg.class_colors) - {c.name for c in card.classes} - renamed
     if unknown:
         problems.append(f"class_colors names unknown classes {sorted(unknown)}")
     output_mpp = cfg.segmentation.output_mpp
     if card.task == "segmentation" and output_mpp is not None and output_mpp < card.input.mpp:
         problems.append(f"segmentation.output_mpp {output_mpp} is finer than the model's")
+    if isinstance(card, SegmentationCard):
+        try:
+            cfg.segmentation.class_remap(card)
+        except ValueError as e:
+            problems.append(str(e))
     return problems
 
 

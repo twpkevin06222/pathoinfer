@@ -9,6 +9,13 @@ config or output formats; the entry says so.
 
 ### Added
 
+- `segmentation.background_classes` counts classes as background, and
+  `segmentation.class_map` renames and merges classes: each key is an output name, its
+  value a model class (renamed) or a list of them (merged), e.g.
+  `{tumor: invasive tumor, stroma: [inflamed stroma, tumor-associated stroma]}`; classes
+  not named keep theirs. Probabilities move before each pixel's class is chosen, so the
+  label map, polygons, overlay and summary all show the result. `class_colors` takes the
+  new names. `pathoinfer validate` checks the names against the model.
 - Each slide ends with a readable summary in the log: time per stage with its share of
   the run, the main process's CPU (average cores used) and peak RAM, and on a local GPU
   its utilisation during inference (mean and max) and peak memory in use on the device,

@@ -19,7 +19,7 @@ from loguru import logger
 
 from patchology import open_slide
 from pathoinfer._logging import add_file_sink, log_call
-from pathoinfer.config import RunConfig
+from pathoinfer.config import ClassRemap, RunConfig
 from pathoinfer.engine.scheduler import (
     STITCH_QUEUE,
     GpuSampler,
@@ -208,7 +208,20 @@ def run_slide(
     finally:
         loader.dataset.close()  # type: ignore[attr-defined]  # TileDataset; open with 0 workers
 
-    run = RunInfo.create(card, grid, cfg.model, output_mpp, cfg.class_colors)
+    remap = (
+        cfg.segmentation.class_remap(card)
+        if isinstance(card, SegmentationCard)
+        else ClassRemap({}, {})
+    )
+    run = RunInfo.create(
+        card,
+        grid,
+        cfg.model,
+        output_mpp,
+        cfg.class_colors,
+        exclude=remap.targets,
+        rename=remap.names,
+    )
     objects = ObjectTable.from_result(result, run, cfg.detection.geometry)
     paths = output_paths(cfg, path)
     cfg.outputs.dir.mkdir(parents=True, exist_ok=True)
@@ -367,6 +380,7 @@ def make_stitcher(
             fill_holes_um2=cfg.segmentation.fill_holes_um2,
             connectivity=cfg.segmentation.connectivity,
             keep_labels=cfg.outputs.tiff,
+            class_targets=cfg.segmentation.class_remap(card).targets,
         )
     if not isinstance(card, DetectionCard):
         raise NotImplementedError(f"no stitcher for {card.task} yet")

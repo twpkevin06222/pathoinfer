@@ -5,7 +5,7 @@ NumPy columns, built from a stitcher's ``StitchResult``; detections never become
 objects on the way. Coordinates are level-0 pixels, x right and y down.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -59,10 +59,15 @@ class RunInfo:
         model_source: str,
         output_mpp: float | None = None,
         colors: Mapping[str, RGB] | None = None,
+        exclude: Collection[int] = (),
+        rename: Mapping[int, str] | None = None,
     ) -> "RunInfo":
-        """Raises ValueError if ``colors`` names a class the card does not have."""
-        colors = colors or {}
-        unknown = set(colors) - {c.name for c in card.classes}
+        """``exclude``: class ids no object can have (dropped or merged into another);
+        ``rename``: new names by class id. ``colors`` are by output name (a renamed class's
+        new name, else its card name). Raises ValueError if ``colors`` names a class the
+        run does not have."""
+        colors, rename = colors or {}, rename or {}
+        unknown = set(colors) - {c.name for c in card.classes} - set(rename.values())
         if unknown:
             raise ValueError(f"colours for unknown classes {sorted(unknown)}")
         background = getattr(card, "background_id", None)
@@ -83,9 +88,14 @@ class RunInfo:
             overlap=grid.overlap,
             tissue_area_um2=tissue_px * grid.slide_mpp**2,
             classes=tuple(
-                c.model_copy(update={"color": colors.get(c.name, c.color)})
+                c.model_copy(
+                    update={
+                        "name": rename.get(c.id, c.name),
+                        "color": colors.get(rename.get(c.id, c.name), c.color),
+                    }
+                )
                 for c in card.classes
-                if c.id != background
+                if c.id != background and c.id not in exclude
             ),
             pathoinfer_version=version("pathoinfer"),
             patchology_version=version("patchology"),

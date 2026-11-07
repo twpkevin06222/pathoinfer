@@ -34,6 +34,11 @@ segmentation:
                                   # another class are kept
   connectivity: 8                 # 8: parts touching at a pixel corner are one region;
                                   # 4: separate regions
+  background_classes: []          # class names counted as background, e.g. [rest]
+  class_map: {}                   # output name -> model class (rename) or [classes] (merge),
+                                  # e.g. {tumor: invasive tumor, stroma: [inflamed stroma,
+                                  # tumor-associated stroma]}; others keep their names.
+                                  # Merged probabilities add before each pixel's class is chosen
 
 outputs:
   dir: outputs/segmentation
