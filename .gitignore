@@ -1,6 +1,7 @@
-# Agent instructions, kept local.
+# Agent instructions and handoff notes, kept local.
 CLAUDE.md
 .claude/
+HANDOFF.md
 
 # Python
 __pycache__/
