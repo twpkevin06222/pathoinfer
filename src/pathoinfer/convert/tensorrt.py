@@ -5,7 +5,8 @@ FP16 from ``convert fp16``, or INT8/FP8 Q/DQ from ``convert ptq``), so the plan 
 what parity checked. One optimisation profile covers batch sizes ``min_batch`` to
 ``max_batch``, tuned for ``opt_batch``. Plans run only on the GPU architecture and
 TensorRT version they were built with, so built plans are cached under ``cache`` by
-(model hash, GPU, compute capability, TensorRT version, precision, profile).
+(model hash, GPU, compute capability, TensorRT version, precision, profile). The model
+hash covers the graph and any external weights beside it (models over 2 GB).
 """
 
 import hashlib
@@ -49,11 +50,10 @@ def build_plan(
     card, model_dir = load_model(str(source))
     if card.framework != "onnx":
         raise ValueError(f"expected an ONNX model, got {card.framework}")
-    onnx_bytes = (model_dir / card.file).read_bytes()
     gpu = torch.cuda.get_device_name(device)
     capability = "{}.{}".format(*torch.cuda.get_device_capability(device))
     key_fields = {
-        "model": hashlib.sha256(onnx_bytes).hexdigest()[:16],
+        "model": _model_hash(model_dir),
         "gpu": gpu,
         "compute_capability": capability,
         "tensorrt": trt.__version__,
@@ -66,7 +66,9 @@ def build_plan(
         logger.info("plan cache hit: {}", cached)
     else:
         with torch.cuda.device(device):
-            plan = _build(trt, onnx_bytes, card, (min_batch, opt_batch, max_batch), workspace_gb)
+            plan = _build(
+                trt, model_dir / card.file, card, (min_batch, opt_batch, max_batch), workspace_gb
+            )
         cache.mkdir(parents=True, exist_ok=True)
         partial = cached.with_suffix(".partial")
         partial.write_bytes(plan)
@@ -89,14 +91,26 @@ def build_plan(
     )
 
 
+def _model_hash(model_dir: Path) -> str:
+    """The graph and every other file in its folder but the card: external weights live
+    beside the graph, and a graph-only hash would reuse a plan across retrained weights."""
+    digest = hashlib.sha256()
+    for path in sorted(model_dir.iterdir()):
+        if path.is_file() and path.name != "model_card.json":
+            with path.open("rb") as f:
+                while chunk := f.read(1 << 24):
+                    digest.update(chunk)
+    return digest.hexdigest()[:16]
+
+
 def _build(
-    trt: Any, onnx_bytes: bytes, card: ModelCard, batches: tuple[int, int, int], workspace_gb: float
+    trt: Any, onnx_path: Path, card: ModelCard, batches: tuple[int, int, int], workspace_gb: float
 ) -> bytes:
     log = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(log)
     network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED))
     parser = trt.OnnxParser(network, log)
-    if not parser.parse(onnx_bytes):
+    if not parser.parse_from_file(str(onnx_path)):  # finds external weights beside it
         errors = [str(parser.get_error(i)) for i in range(parser.num_errors)]
         raise ValueError("TensorRT could not parse the ONNX model:\n" + "\n".join(errors))
     config = builder.create_builder_config()

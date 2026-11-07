@@ -27,12 +27,16 @@ under ``fill_holes_um2`` are filled unless another class's region lies inside th
 same-class islands inside a filled hole are dropped; regions under ``min_area_um2`` are
 dropped before any further work.
 
-Post-processing, per polygon: simplify (``simplify_px`` output pixels, topology kept),
-which turns pixel staircases into diagonal runs; smooth with ``smooth`` rounds of
-Chaikin corner cutting (each round replaces every vertex with points 1/4 and 3/4 along
-its two edges, doubling the vertices and converging to a quadratic B-spline, so outlines
-are curves rather than pixel steps); make valid, keep polygonal parts, drop regions under ``min_area_um2``, scale to level 0
-and round to 0.1 px. Measurements: ``area_um2``, ``perimeter_um`` and ``mean_probability``
+Post-processing, all regions together as one coverage (``post.vectorise.to_features``),
+so neighbouring classes keep sharing one border line and never overlap: simplify
+(``simplify_px`` output pixels), which turns pixel staircases into diagonal runs; smooth
+with ``smooth`` rounds of Chaikin corner cutting per border arc (each round replaces every
+vertex with points 1/4 and 3/4 along its two edges, so outlines are curves rather than
+pixel steps); make valid, keep polygonal parts, scale to level 0 and round to 0.1 px.
+
+Label map (``keep_labels``): the argmax, with the same clean-up painted in (filled holes
+take their class, removed regions become the background), so it holds the same objects
+as the polygons, on exact pixels. Measurements: ``area_um2``, ``perimeter_um`` and ``mean_probability``
 (the blended probability of the polygon's class over its pixels).
 """
 
@@ -52,7 +56,7 @@ from pathoinfer.post.vectorise import (
     fill_holes,
     merge,
     regions,
-    to_feature,
+    to_features,
 )
 from pathoinfer.registry.model_card import SegmentationCard
 from pathoinfer.runtime.base import Outputs
@@ -136,25 +140,24 @@ class SegmentationStitcher:
             for band in sorted(self._bands):
                 self._finish_band(band)
         pieces = self._done + merge(self._seams, self.connectivity)
-        pieces = fill_holes(pieces, self.fill_holes_px)
+        pieces, holes = fill_holes(pieces, self.fill_holes_px)
+        small = [p for p in pieces if p.geometry.area < self.min_area_px]
         pieces = [p for p in pieces if p.geometry.area >= self.min_area_px]
+        if self._labels is not None:  # the label map shows the same clean-up as the polygons
+            background = -1 if self.card.background_id is None else self.card.background_id
+            for piece in holes:
+                _paint(self._labels, piece.geometry, piece.class_id)
+            for piece in small:
+                _paint(self._labels, piece.geometry, background)
         names = {c.id: c.name for c in self.card.classes}
-        features = [
-            f
-            for p in pieces
-            if (
-                f := to_feature(
-                    p,
-                    names[p.class_id],
-                    level0_per_px=self.level0_per_px,
-                    slide_mpp=self.grid.slide_mpp,
-                    simplify_px=self.simplify_px,
-                    smooth=self.smooth,
-                    min_area_um2=self.min_area_um2,
-                )
-            )
-            is not None
-        ]
+        features = to_features(
+            pieces,
+            names,
+            level0_per_px=self.level0_per_px,
+            slide_mpp=self.grid.slide_mpp,
+            simplify_px=self.simplify_px,
+            smooth=self.smooth,
+        )
         logger.info(
             "segmentation: {} polygons; peak canvas {:.1f} MiB (bands of {} x {} px at {:.3g} mpp)",
             len(features),
@@ -224,3 +227,12 @@ class SegmentationStitcher:
                 at_top = top > 0 and miny <= top
                 at_bottom = top + rows < self.height and maxy >= top + rows
                 (self._seams if at_top or at_bottom else self._done).append(piece)
+
+
+def _paint(labels: NDArray[np.int16], geometry: shapely.Geometry, value: int) -> None:
+    """Set the pixels of ``labels`` whose centres lie in ``geometry`` (output px, on pixel
+    edges) to ``value``. Only for small regions: it tests every pixel of the bounding box."""
+    x0, y0, x1, y1 = (round(b) for b in geometry.bounds)
+    rows, cols = np.mgrid[y0:y1, x0:x1]
+    inside = shapely.contains_xy(geometry, cols + 0.5, rows + 0.5)
+    labels[y0:y1, x0:x1][inside] = value

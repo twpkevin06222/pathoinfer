@@ -3,7 +3,14 @@ import numpy as np
 import pytest
 import shapely
 
-from pathoinfer.post.vectorise import merge, regions, vectorise
+from pathoinfer.post.vectorise import (
+    fill_holes,
+    merge,
+    regions,
+    shape_borders,
+    to_features,
+    vectorise,
+)
 
 
 def pixels(mask: np.ndarray) -> shapely.Geometry:
@@ -91,3 +98,53 @@ def test_vectorise_maps_pixels_to_level0() -> None:
     )
     assert f.geometry.bounds == (100 + 3 * 8, 50 + 2 * 8, 100 + 7 * 8, 50 + 4 * 8)
     assert f.measurements["area_um2"] == pytest.approx(8 * 64 * 0.25)
+
+
+@pytest.mark.parametrize("seed", range(3))
+@pytest.mark.parametrize("smooth", [0, 2])
+def test_neighbouring_classes_share_their_borders(seed: int, smooth: int) -> None:
+    """Regions of a noisy label map, simplified and smoothed: no two overlap, and together
+    they cover what the pixels cover, so every shared border is one line."""
+    rng = np.random.default_rng(seed)
+    noise = cv2.GaussianBlur(rng.random((80, 80)).astype(np.float32), (0, 0), 3)
+    labels = np.digitize(noise, np.quantile(noise, [0.3, 0.6]))
+    values = np.ones(labels.shape, np.float32)
+    pieces = [p for c in (0, 1, 2) for p in regions(labels == c, values, c + 1, 0)]
+    features = to_features(
+        pieces, {1: "a", 2: "b", 3: "c"}, level0_per_px=1, slide_mpp=1, smooth=smooth
+    )
+    geometries = np.array([f.geometry for f in features])
+    left, right = shapely.STRtree(geometries).query(geometries, predicate="intersects")
+    pairs = left < right
+    overlap = shapely.area(shapely.intersection(geometries[left[pairs]], geometries[right[pairs]]))
+    assert overlap.max(initial=0) < 0.05  # rounding to 0.1 px, nothing more
+    assert shapely.union_all(geometries).area == pytest.approx(80 * 80, abs=2)
+
+
+def test_hole_is_kept_when_another_class_leaves_it_through_a_corner() -> None:
+    """Class 2 fills a hole in class 1 and also continues outside it through a pixel
+    corner: it is one 8-connected region, not contained in the hole, and must still keep
+    the hole open."""
+    labels = np.ones((7, 7), int)
+    labels[0, :] = labels[:, 0] = 0
+    labels[2:4, 2:4] = 2  # the hole
+    labels[1, 1] = 2  # leaves through the corner at (2, 2)
+    values = np.ones(labels.shape, np.float32)
+    pieces = [p for c in (1, 2) for p in regions(labels == c, values, c, 0, 8)]
+    filled, _ = fill_holes(pieces, max_px=100)
+    by_class = {p.class_id: p.geometry for p in filled}
+    assert by_class[1].intersection(by_class[2]).area == 0
+    assert by_class[1].area == (labels == 1).sum()
+
+
+def test_a_simplified_border_never_runs_through_a_junction() -> None:
+    """From a real slide: simplifying class 2's border drew a segment through the corner
+    where only other borders end, so its ring touched itself (and repairing the whole
+    slide's stroma polygon took 25 s)."""
+    labels = np.array(
+        [[2, 2, 2, 2, 2, 2], [2, 7, 7, 7, 7, 2], [7, 7, 2, 0, 7, 7], [7, 2, 2, 7, 2, 2]]
+    )
+    values = np.ones(labels.shape, np.float32)
+    pieces = [p for c in (2, 7) for p in regions(labels == c, values, c, 0)]
+    shaped = shape_borders(np.array([p.geometry for p in pieces]), 1.5, 0)
+    assert shapely.is_valid(shaped).all()

@@ -36,6 +36,7 @@ outputs:
   gzip: true
   per_class: true                 # one GeoJSON per cell type
   parquet: true
+  summary_format: parquet         # or json: <slide>.summary.json, class name -> numbers
   geoparquet: false
 
 class_colors: {}

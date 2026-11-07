@@ -75,7 +75,10 @@ Requires Python 3.12 or later.
 | `mlflow` | Models from an MLflow registry: `models:/NAME@ALIAS` |
 | `hf` | Models from the Hugging Face Hub: `hf://ORG/REPO` |
 | `geopandas` | `pathoinfer.io.interop.to_geodataframe` |
-| `trt`, `triton`, `vllm-client`, `serve`, `convert` | Later releases (TensorRT, remote runtimes, serving, conversion) |
+| `trt` | TensorRT plans (`pathoinfer convert trt`) and their runtime |
+| `convert` | FP16 and INT8/FP8 conversion (`src/pathoinfer/convert/README.md`) |
+| `triton`, `vllm-client` | Clients for models on Triton or vLLM servers |
+| `serve` | The slide job API (`src/pathoinfer/serving/README.md`) |
 
 Check the install:
 

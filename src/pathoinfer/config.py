@@ -87,16 +87,21 @@ class DetectionOptions(_Strict):
 
 
 class OutputConfig(_Strict):
-    """What to write per slide into ``dir`` (``docs/outputs.md``). ``tiff`` writes the
-    segmentation label map."""
+    """What to write per slide into ``dir`` (``docs/outputs.md``). ``parquet`` writes the
+    objects table and the per-class summary, as Parquet or ``summary_format: json``.
+    ``tiff`` writes the segmentation label map; ``overlay`` a PNG of the slide at
+    ``overlay_mpp`` with the segmentation polygons filled in their class colours."""
 
     dir: Path = Path("outputs")
     geojson: bool = True
     gzip: bool = True
     per_class: bool = False
     parquet: bool = True
+    summary_format: Literal["parquet", "json"] = "parquet"
     geoparquet: bool = False
     tiff: bool = False
+    overlay: bool = True
+    overlay_mpp: float = Field(6.0, gt=0)
 
 
 class RunConfig(_Strict):

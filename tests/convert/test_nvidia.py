@@ -96,6 +96,35 @@ def test_fp16_plan_builds_caches_and_passes_parity(tmp_path: Path, slide: Path) 
 
 
 @pytest.mark.gpu
+def test_plan_reads_external_weights_and_caches_by_them(tmp_path: Path) -> None:
+    """Models over 2 GB keep weights in a file beside the graph: the plan must find it
+    from any working directory, and new weights must not reuse the old plan."""
+    pytest.importorskip("tensorrt")
+    import shutil
+
+    from onnx import numpy_helper
+
+    from pathoinfer.convert.tensorrt import build_plan
+
+    cache = tmp_path / "cache"
+    for scale in (1.0, 2.0):
+        folder = tmp_path / f"external{scale}"
+        shutil.copytree(TINY, folder)
+        model = onnx.load(str(folder / "model.onnx"))
+        for init in model.graph.initializer:
+            init.CopyFrom(numpy_helper.from_array(numpy_helper.to_array(init) * scale, init.name))
+        onnx.save(
+            model,
+            str(folder / "model.onnx"),
+            save_as_external_data=True,
+            location="model.onnx.data",
+            size_threshold=0,
+        )
+        build_plan(folder, tmp_path / f"plan{scale}", opt_batch=8, max_batch=8, cache=cache)
+    assert len(list(cache.glob("*.plan"))) == 2
+
+
+@pytest.mark.gpu
 @pytest.mark.parametrize("precision", ["int8", "fp8"])
 def test_modelopt_plans_run_through_parity(tmp_path: Path, slide: Path, precision: str) -> None:
     pytest.importorskip("modelopt.onnx.quantization")

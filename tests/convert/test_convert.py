@@ -59,6 +59,37 @@ def test_fp16_conversion_records_its_parent(tmp_path: Path) -> None:
         to_fp16(TINY, tmp_path / "fp16")
 
 
+def test_fp16_keeps_external_weights_beside_the_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Models over 2 GB keep weights in ``model.onnx.data``: the conversion reads them
+    from beside the graph and, still large in FP16, writes them the same way."""
+    import shutil
+
+    from pathoinfer.convert import fp16
+    from pathoinfer.runtime.local.onnx import OnnxRuntime
+
+    source = tmp_path / "big"
+    shutil.copytree(TINY, source)
+    onnx.save(
+        onnx.load(source / "model.onnx"),
+        source / "model.onnx",
+        save_as_external_data=True,
+        location="model.onnx.data",
+        size_threshold=0,
+    )
+    monkeypatch.setattr(fp16, "EXTERNAL_BYTES", 0)  # the tiny model counts as large
+    card = fp16.to_fp16(source, tmp_path / "fp16")
+    assert (tmp_path / "fp16" / "model.onnx.data").is_file()
+    side = card.input.tile_size
+    tiles = torch.randint(0, 256, (2, side, side, 3), dtype=torch.uint8)
+    reference, _ = load_model(str(TINY))
+    want = OnnxRuntime(reference, TINY / "model.onnx", device="cpu").predict(tiles)
+    got = OnnxRuntime(card, tmp_path / "fp16" / "model.onnx", device="cpu").predict(tiles)
+    for name, value in want.items():
+        assert np.allclose(np.asarray(got[name]), np.asarray(value), atol=0.05)
+
+
 def test_fp16_io_changes_the_input_dtype(tmp_path: Path) -> None:
     card = to_fp16(TINY, tmp_path / "fp16", keep_io_types=False)
     assert card.input.dtype == "float16"
