@@ -119,6 +119,13 @@ config or output formats; the entry says so.
 
 ### Fixed
 
+- The label map TIFF is a pyramid OpenSlide, fastslide and QuPath open. Its levels were
+  SubIFDs, which OpenSlide (and QuPath through it) does not see, so it read one level
+  and reported no pyramid; each level is now a top-level image. Label maps are 8-bit,
+  class ids with 255 where no tile reached (was int16 with -1): OpenSlide reads 16-bit
+  images as zeros. Breaking: the TIFF's dtype and no-data value change. QuPath opens
+  plain TIFFs with Bio-Formats, which sees one level; choose its OpenSlide reader
+  (`docs/qupath.md`).
 - Segmentation post-processing is about twice as fast (95 s to 49 s on a 29,000-tile
   slide at 6 mpp): band pieces merge with a coverage union, filling a hole drops its ring
   instead of a union with the whole region, and only invalid polygons are repaired.

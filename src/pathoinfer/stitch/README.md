@@ -51,7 +51,7 @@ for feature in result.features:
 | `connectivity` | `8` | 8: parts touching only at a pixel corner are one region (a MultiPolygon meeting at the point); 4: separate regions, so diagonal strands break up |
 | `fill_holes_um2` | `0.0` | Fill holes smaller than this. A hole that holds another class's region is kept, so classes never overlap; same-class islands inside a filled hole are dropped. `.inf` in YAML fills every hole |
 | `band_height` | `2 * tile` | Rows per band, in output pixels |
-| `keep_labels` | `False` | Also return the slide's label map as `rasters["labels"]` (-1 where no tile reached) |
+| `keep_labels` | `False` | Also return the slide's label map as `rasters["labels"]` (-1 where no tile reached; 255 in the TIFF) |
 
 How it works (the module docstring has the maths):
 
