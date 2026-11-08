@@ -87,6 +87,22 @@ def test_segmentation_writes_every_output(tmp_path: Path, slides: Path) -> None:
     with tifffile.TiffFile(out / "slide_name-01.labels.tiff") as tif:
         labels = tif.series[0].levels[0].asarray()
     assert labels.dtype == np.uint8 and set(np.unique(labels)) <= {0, 1, 255}  # 255: no tile
+    # The precision the model ran in is recorded with every run.
+    marker = json.loads((out / "slide_name-01.done.json").read_text())
+    summary = pl.read_parquet(out / "slide_name-01.summary.parquet")
+    (batch,) = [p for p in out.iterdir() if p.name.startswith("batch-")]
+    assert marker["precision"] == "fp32" and (summary["precision"] == "fp32").all()
+    assert pl.read_parquet(batch)["precision"].to_list() == ["fp32"]
+
+
+def test_autocast_is_the_precision_a_torch_model_runs_in(tmp_path: Path, slides: Path) -> None:
+    torch_model = str(model(tmp_path, "tiny_seg_torch"))
+    plain = config(tmp_path / "plain", slides, "segmentation", model=torch_model)
+    assert load(plain).precision == "fp32"
+    cfg = config(
+        tmp_path / "bf16", slides, "segmentation", model=torch_model, runtime={"autocast": "bf16"}
+    )
+    assert load(cfg).precision == "bf16"
 
 
 def test_detection_reports_one_object_per_tile(tmp_path: Path, slides: Path) -> None:
@@ -159,7 +175,11 @@ def test_an_error_mid_slide_stops_the_reader_processes(tmp_path: Path, slides: P
     cfg = config(tmp_path, slides, "segmentation", loader={"num_workers": 2})
     loaded = load(cfg)
     broken = type(loaded)(
-        loaded.card, loaded.model_dir, Exploding(loaded.runtime), loaded.settings_hash
+        loaded.card,
+        loaded.model_dir,
+        Exploding(loaded.runtime),
+        loaded.settings_hash,
+        loaded.precision,
     )  # type: ignore[arg-type]
     with pytest.raises(RuntimeError, match="boom"):
         run_slide(cfg, slides / "slide_name-01.tiff", broken)

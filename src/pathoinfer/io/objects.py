@@ -38,6 +38,7 @@ class RunInfo:
     task: Task
     model_name: str
     model_version: str
+    precision: str
     model_source: str
     model_card_schema: int
     slide_mpp: float
@@ -61,8 +62,11 @@ class RunInfo:
         colors: Mapping[str, RGB] | None = None,
         exclude: Collection[int] = (),
         rename: Mapping[int, str] | None = None,
+        precision: str | None = None,
     ) -> "RunInfo":
-        """``exclude``: class ids no object can have (dropped or merged into another);
+        """``precision``: what the model ran in (default the card's; the autocast dtype for
+        an autocast PyTorch model). ``exclude``: class ids no object can have (dropped or
+        merged into another);
         ``rename``: new names by class id. ``colors`` are by output name (a renamed class's
         new name, else its card name). Raises ValueError if ``colors`` names a class the
         run does not have."""
@@ -79,6 +83,7 @@ class RunInfo:
             task=card.task,
             model_name=card.name,
             model_version=card.version,
+            precision=precision or card.precision,
             model_source=model_source,
             model_card_schema=card.schema_version,
             slide_mpp=grid.slide_mpp,

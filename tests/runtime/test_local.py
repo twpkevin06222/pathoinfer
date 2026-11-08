@@ -84,6 +84,50 @@ def test_card_dtype_must_match_the_graph() -> None:
         OnnxRuntime(card, FIXTURES / "tiny_seg" / "model.onnx", device="cpu")
 
 
+def test_card_precision_must_match_the_graph() -> None:
+    pytest.importorskip("onnxruntime")
+    from pathoinfer.runtime.local.onnx import OnnxRuntime
+
+    card, model_dir = load_model(FIXTURES / "tiny_seg")
+    mislabelled = card.model_copy(update={"precision": "fp16"})
+    with pytest.raises(ValueError, match="card precision is fp16, graph is fp32"):
+        OnnxRuntime(mislabelled, model_dir / card.file, device="cpu")
+
+
+def _qdq_graph(path: Path, zero_point_type: int) -> Path:
+    # x -> QuantizeLinear -> DequantizeLinear -> y, with fp32 weights elsewhere.
+    onnx = pytest.importorskip("onnx")
+    h, T = onnx.helper, onnx.TensorProto
+    scale = h.make_tensor("scale", T.FLOAT, [], [0.1])
+    zero = h.make_tensor("zero", zero_point_type, [], [0])
+    weights = h.make_tensor("w", T.FLOAT, [64], [0.0] * 64)
+    nodes = [
+        h.make_node("QuantizeLinear", ["x", "scale", "zero"], ["q"]),
+        h.make_node("DequantizeLinear", ["q", "scale", "zero"], ["dq"]),
+        h.make_node("Add", ["dq", "w"], ["y"]),
+    ]
+    graph = h.make_graph(
+        nodes,
+        "qdq",
+        [h.make_tensor_value_info("x", T.FLOAT, [64])],
+        [h.make_tensor_value_info("y", T.FLOAT, [64])],
+        [scale, zero, weights],
+    )
+    onnx.save(h.make_model(graph, opset_imports=[h.make_opsetid("", 21)]), path)
+    return path
+
+
+def test_graph_precision_reads_weights_and_quantisation(tmp_path: Path) -> None:
+    onnx = pytest.importorskip("onnx")
+    from pathoinfer.runtime.local.onnx import graph_precision
+
+    assert graph_precision(FIXTURES / "tiny_seg" / "model.onnx") == "fp32"
+    assert graph_precision(FIXTURES / "tiny_seg_fp16" / "model.onnx") == "fp16"
+    T = onnx.TensorProto
+    assert graph_precision(_qdq_graph(tmp_path / "int8.onnx", T.INT8)) == "int8"
+    assert graph_precision(_qdq_graph(tmp_path / "fp8.onnx", T.FLOAT8E4M3FN)) == "fp8"
+
+
 def test_factory_rejects_weights_only_models() -> None:
     card, model_dir = load_model(FIXTURES / "tiny_seg")
     other = card.model_copy(update={"framework": "safetensors", "file": "model.safetensors"})

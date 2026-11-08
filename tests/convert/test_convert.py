@@ -43,7 +43,7 @@ def broken(out: Path) -> Path:
     w2 = next(t for t in model.graph.initializer if t.name == "w2")
     flipped = -onnx.numpy_helper.to_array(w2)
     w2.CopyFrom(onnx.numpy_helper.from_array(flipped, "w2"))
-    write_variant(card, out, lambda p: onnx.save(model, p), precision="fp16", version="1+bad")
+    write_variant(card, out, lambda p: onnx.save(model, p), precision="fp32", version="1+bad")
     return out
 
 
