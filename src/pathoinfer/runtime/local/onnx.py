@@ -2,7 +2,8 @@
 
 On CUDA the input is preprocessed on the GPU and bound with IO binding through DLPack,
 and the outputs stay on the GPU (``torch.from_dlpack``): no host round trip. The input
-dtype comes from the card (float16 for an fp16 graph) and must match the graph's.
+dtype comes from the card (float16 for an fp16 graph) and must match the graph's. The
+card's ``precision`` must match what the graph computes in (:func:`graph_precision`).
 """
 
 import ctypes
@@ -10,6 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from loguru import logger
 from torch.utils.dlpack import from_dlpack
@@ -49,6 +51,9 @@ class OnnxRuntime:
         self.providers: list[str] = self.session.get_providers()
         self._outputs = card.output.tensor_names()
         _check_signature(self.session, card, model_path)
+        graph = graph_precision(model_path)
+        if graph != card.precision:
+            raise ValueError(f"{model_path}: card precision is {card.precision}, graph is {graph}")
 
     def predict(self, batch: torch.Tensor) -> Outputs:
         return run_in_fixed_batches(batch, self.batch_size, self._run)
@@ -106,6 +111,36 @@ def _nvinfer_loads() -> bool:
         logger.debug("{} not found; TensorRT EP skipped", NVINFER)
         return False
     return True
+
+
+def graph_precision(path: Path) -> str:
+    """What the ONNX graph at ``path`` computes in: ``fp8`` or ``int8`` if its
+    Quantize/DequantizeLinear nodes use that type (``convert ptq``), else ``fp16`` or
+    ``bf16`` if most weight elements are (``convert fp16``), else ``fp32``. Reads the
+    graph only, not external weight files."""
+    onnx = require("onnx", extra("onnx"))
+    T = onnx.TensorProto
+    graph = onnx.load(str(path), load_external_data=False).graph
+    types = {t.name: t.data_type for t in graph.initializer}
+    for node in graph.node:
+        if node.op_type == "Constant" and node.attribute and node.attribute[0].HasField("t"):
+            types[node.output[0]] = node.attribute[0].t.data_type
+    quantised = {
+        types.get(name)
+        for node in graph.node
+        if node.op_type in ("QuantizeLinear", "DequantizeLinear")
+        for name in node.input[::2]  # the quantised data and its zero point
+    }
+    if quantised & {T.FLOAT8E4M3FN, T.FLOAT8E4M3FNUZ, T.FLOAT8E5M2, T.FLOAT8E5M2FNUZ}:
+        return "fp8"
+    if quantised & {T.INT8, T.UINT8}:
+        return "int8"
+    sizes: dict[int, int] = {}
+    for t in graph.initializer:
+        sizes[t.data_type] = sizes.get(t.data_type, 0) + int(np.prod(t.dims))
+    floats = {"fp32": sizes.get(T.FLOAT, 0), "fp16": sizes.get(T.FLOAT16, 0)}
+    floats["bf16"] = sizes.get(T.BFLOAT16, 0)
+    return max(floats, key=floats.__getitem__) if any(floats.values()) else "fp32"
 
 
 def _check_signature(session: Any, card: ModelCard, path: Path) -> None:

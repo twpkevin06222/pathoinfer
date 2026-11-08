@@ -57,6 +57,7 @@ class Model:
     model_dir: Path
     runtime: Runtime
     settings_hash: str
+    precision: str  # what the model runs in: the card's, or the autocast dtype
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,9 @@ def load(cfg: RunConfig) -> Model:
     logger.debug("model card: {}", card.model_dump_json())
     runtime = make_runtime(card, model_dir, cfg.runtime)
     runtime.warmup()
-    return Model(card, model_dir, runtime, cfg.settings_hash(card.model_dump_json()))
+    autocast = card.framework == "torch" and not cfg.runtime.triton_url and cfg.runtime.autocast
+    precision = autocast or card.precision
+    return Model(card, model_dir, runtime, cfg.settings_hash(card.model_dump_json()), precision)
 
 
 def output_paths(cfg: RunConfig, slide: Path) -> dict[str, Path]:
@@ -221,6 +224,7 @@ def run_slide(
         cfg.class_colors,
         exclude=remap.targets,
         rename=remap.names,
+        precision=model.precision,
     )
     objects = ObjectTable.from_result(result, run, cfg.detection.geometry)
     paths = output_paths(cfg, path)
@@ -241,6 +245,7 @@ def run_slide(
                 )
     marker = {
         "settings_hash": model.settings_hash,
+        "precision": model.precision,
         "slide": str(path),
         "slide_id": grid.slide_id,
         "outputs": [str(p) for p in written],
@@ -306,16 +311,17 @@ def run_batch(cfg: RunConfig) -> list[RunResult]:
     try:
         model = load(cfg)
         logger.info(
-            "run start: {} slides, model {} {} ({}), settings {}",
+            "run start: {} slides, model {} {} ({}), precision {}, settings {}",
             len(slides),
             model.card.name,
             model.card.version,
             cfg.model,
+            model.precision,
             model.settings_hash,
         )
         results = [_run_one(cfg, path, model) for path in slides]
         summary = cfg.outputs.dir / f"batch-{stamp}.parquet"
-        _batch_frame(results, model.settings_hash).write_parquet(summary)
+        _batch_frame(results, model.settings_hash, model.precision).write_parquet(summary)
         counts = Counter(r.status for r in results)
         logger.info(
             "run end: {} done, {} skipped, {} failed in {:.1f} s; summary {}",
@@ -341,7 +347,7 @@ def _run_one(cfg: RunConfig, path: Path, model: Model) -> RunResult:
         return RunResult(path, "failed", error=f"{type(e).__name__}: {e}")
 
 
-def _batch_frame(results: list[RunResult], settings_hash: str) -> pl.DataFrame:
+def _batch_frame(results: list[RunResult], settings_hash: str, precision: str) -> pl.DataFrame:
     stages = sorted({k for r in results for k in r.timings})
     rows = [
         {
@@ -355,6 +361,7 @@ def _batch_frame(results: list[RunResult], settings_hash: str) -> pl.DataFrame:
             "peak_rss_mb": r.peak_memory.get("rss_mb"),
             "error": r.error,
             "settings_hash": settings_hash,
+            "precision": precision,
         }
         for r in results
     ]
