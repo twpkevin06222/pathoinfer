@@ -169,7 +169,9 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument(
         "--batch", type=int, nargs=3, default=[1, 32, 64], metavar=("MIN", "OPT", "MAX")
     )
-    plan.add_argument("--workspace-gb", type=float, default=4.0)
+    plan.add_argument(
+        "--workspace-gb", type=float, default=None, help="tactic memory cap (default: the GPU's)"
+    )
     plan.add_argument("--device", type=int, default=0, help="CUDA device index")
     plan.set_defaults(handler=_convert_trt)
     parity = convert.add_parser("parity", help="parity gate for a converted model")
