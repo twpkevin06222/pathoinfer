@@ -134,6 +134,13 @@ config or output formats; the entry says so.
 
 ### Fixed
 
+- Segmentation `finalize` was slow on large regions: `shape_borders` densified whole
+  polygons, and GEOS re-validates each one, which took 365 s on one 58k-hole region of a
+  real slide at 2 mpp. It now densifies their rings (0.1 s; the same vertices). On that
+  slide `finalize` went from about 400 s to 86 s; polygons are unchanged.
+- `fill_holes` kept a region's own same-class islands inside the holes it filled (other
+  regions' islands were dropped). The result was an invalid MultiPolygon, which the slow
+  densify above had silently repaired; such islands are now dropped too.
 - `convert fp16` let ONNX Runtime's converter clip weights above FP16's range (65504)
   silently. HoVer-Net's decoder BatchNorms hold running variances up to 3e7, so its FP16
   variant scaled them up to 22x and failed parity with F1 0. BatchNorms whose

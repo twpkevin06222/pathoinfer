@@ -302,7 +302,14 @@ def fill_holes(pieces: list[Piece], max_px: float) -> tuple[list[Piece], list[Pi
             [ring for n, (k, ring) in enumerate(rings) if k == idx and n not in gone]
             for idx in range(len(polygons))
         ]
-        parts = [Polygon(poly.exterior, r) for poly, r in zip(polygons, kept_rings, strict=True)]
+        # The piece's own islands in a filled hole go too (other pieces' are in ``dropped``):
+        # kept, they would lie inside the filled polygon, an invalid MultiPolygon.
+        islands = set(shapely.STRtree(fill).query(polygons, predicate="within")[0].tolist())
+        parts = [
+            Polygon(poly.exterior, r)
+            for k, (poly, r) in enumerate(zip(polygons, kept_rings, strict=True))
+            if k not in islands
+        ]
         filled[i] = parts[0] if len(parts) == 1 else MultiPolygon(parts)
         holes_filled += [Piece(h, piece.class_id, 0.0, 0) for h in fill]
     kept = [
@@ -326,8 +333,11 @@ def shape_borders(geometries: NDArray[Any], simplify_px: float, rounds: int) -> 
     ``SMOOTH_TOLERANCE_PX``. Arcs a pixel apart (both sides of a thin strand) can then
     cross; an arc that touches another anywhere but at their shared ends steps back to
     smoothing only, then to its exact pixel line, until nothing crosses."""
-    parts, part_owner = shapely.get_parts(shapely.segmentize(geometries, 1.0), return_index=True)
+    parts, part_owner = shapely.get_parts(geometries, return_index=True)
     rings, ring_part = shapely.get_rings(parts, return_index=True)
+    # Densify rings, not polygons: GEOS re-validates each densified polygon, which took 365 s
+    # on one 58k-hole stroma region of a real slide at 2 mpp; its rings take 0.1 s.
+    rings = shapely.segmentize(rings, 1.0)
     coords, ring_of = shapely.get_coordinates(rings, return_index=True)
     _, vertex = np.unique(coords, axis=0, return_inverse=True)
     vertex = vertex.ravel()
