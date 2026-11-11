@@ -309,6 +309,7 @@ class ParityConfig(_Strict):
     tolerances: ParityTolerances = ParityTolerances()
     segmentation: SegmentationOptions = SegmentationOptions()
     detection: DetectionOptions = DetectionOptions()
+    instance: InstanceOptions = InstanceOptions()
 
 
 class VqaDataConfig(_Strict):

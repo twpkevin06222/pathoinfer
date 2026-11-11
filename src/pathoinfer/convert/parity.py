@@ -8,6 +8,8 @@ for both models, and the stitched results are compared per class, pooled over wi
 - segmentation: Dice of the class's polygons (``2|A n B| / (|A| + |B|)``);
 - detection: F1 of detections matched one to one by box IoU >= ``iou``, and the
   relative count difference ``|n_candidate - n_reference| / max(n_reference, 1)``;
+- instance: the same two metrics for nuclei, matched one to one by polygon IoU >= ``iou``
+  (background is never written, so it is not scored);
 - classification: one-vs-rest AUC of the candidate's core probabilities against the
   reference's argmax labels.
 
@@ -42,6 +44,7 @@ from pathoinfer.registry.loader import load_model
 from pathoinfer.registry.model_card import (
     ClassificationCard,
     DetectionCard,
+    InstanceCard,
     ModelCard,
     Parity,
     SegmentationCard,
@@ -51,8 +54,9 @@ from pathoinfer.registry.model_card import (
 from pathoinfer.runtime.base import Runtime, preprocess, resolve_device
 from pathoinfer.runtime.factory import make_runtime
 from pathoinfer.stitch.base import Stitcher, StitchResult
-from pathoinfer.stitch.detection import Detections, DetectionStitcher
+from pathoinfer.stitch.detection import DetectionStitcher
 from pathoinfer.stitch.heatmap import HeatmapStitcher
+from pathoinfer.stitch.instance import InstanceStitcher
 from pathoinfer.stitch.segmentation import SegmentationStitcher
 from pathoinfer.tiling.grid import SlideGrid, build_grid, read_tile
 
@@ -238,39 +242,89 @@ def register_model(folder: Path, name: str, alias: str, tracking_uri: str | None
 
 
 def layer_errors(
-    card: ModelCard, ref_dir: Path, candidate: Path, images: NDArray[np.uint8], top: int = 5
+    card: ModelCard,
+    ref_dir: Path,
+    candidate: Path,
+    images: NDArray[np.uint8],
+    top: int = 5,
+    budget_bytes: int = 1 << 30,
 ) -> list[tuple[str, float]]:
     """The ``top`` intermediate tensors (by name, present in both ONNX graphs) whose
-    candidate values differ most from the reference's: relative L2 error on ``images``."""
+    candidate values differ most from the reference's: relative L2 error on ``images``.
+
+    Tensors are fetched in groups of about ``budget_bytes`` per graph (sizes from the
+    reference graph's inferred shapes; a tensor of unknown size runs alone), one session run
+    per group, so memory stays bounded: all of HoVer-Net's tensors at once took 60 GB."""
     onnx = require("onnx", extra("convert"))
     ort = require("onnxruntime", extra("onnx"))
     graphs = [onnx.load(ref_dir / card.file), onnx.load(candidate)]
     names = [{o for n in g.graph.node for o in n.output if o} for g in graphs]
     shared = sorted(names[0] & names[1])
-    outputs = []
-    for model in graphs:
-        model.graph.output.extend(
-            onnx.helper.make_empty_tensor_value_info(n)
-            for n in shared
-            if n not in {o.name for o in model.graph.output}
-        )
-        session = ort.InferenceSession(
-            model.SerializeToString(), providers=["CPUExecutionProvider"]
-        )
-        x = preprocess(torch.from_numpy(images), card, resolve_device("cpu"))
-        feed = {session.get_inputs()[0].name: _as_input(x, session)}
-        values = dict(
-            zip([o.name for o in session.get_outputs()], session.run(None, feed), strict=True)
-        )
-        outputs.append(values)
+    sizes = _tensor_bytes(onnx, graphs[0], len(images))
+    x = preprocess(torch.from_numpy(images), card, resolve_device("cpu"))
     errors = []
-    for n in shared:
-        r, c = outputs[0].get(n), outputs[1].get(n)
-        if r is None or c is None or r.shape != c.shape or not np.issubdtype(r.dtype, np.floating):
-            continue
-        r64, c64 = r.astype(np.float64), c.astype(np.float64)
-        errors.append((n, float(np.linalg.norm(c64 - r64) / max(np.linalg.norm(r64), 1e-12))))
+    for group in _groups(shared, sizes, budget_bytes):
+        r_values, c_values = (_run_outputs(onnx, ort, g, group, x) for g in graphs)
+        for n in group:
+            r, c = r_values[n], c_values[n]
+            if r.shape != c.shape or not np.issubdtype(r.dtype, np.floating):
+                continue
+            r64, c64 = r.astype(np.float64), c.astype(np.float64)
+            errors.append((n, float(np.linalg.norm(c64 - r64) / max(np.linalg.norm(r64), 1e-12))))
     return sorted(errors, key=lambda e: -e[1])[:top]
+
+
+def _tensor_bytes(onnx: Any, model: Any, batch: int) -> dict[str, int]:
+    """Bytes of each node output whose shape inference resolves, for ``batch`` inputs."""
+    sized = onnx.ModelProto()
+    sized.CopyFrom(model)
+    for dim in sized.graph.input[0].type.tensor_type.shape.dim[:1]:
+        if not dim.dim_value:
+            dim.dim_value = batch
+    try:
+        inferred = onnx.shape_inference.infer_shapes(sized)
+    except (onnx.shape_inference.InferenceError, ValueError):  # >2 GB models: ValueError
+        return {}
+    out = {}
+    for v in [*inferred.graph.value_info, *inferred.graph.output]:
+        t = v.type.tensor_type
+        dims = [d.dim_value for d in t.shape.dim]
+        if t.elem_type and dims and all(dims):
+            itemsize = onnx.helper.tensor_dtype_to_np_dtype(t.elem_type).itemsize
+            out[v.name] = int(np.prod(dims)) * itemsize
+    return out
+
+
+def _groups(names: list[str], sizes: dict[str, int], budget: int) -> Iterator[list[str]]:
+    """``names`` in order, packed into groups whose known sizes sum to at most ``budget``."""
+    group: list[str] = []
+    used = 0
+    for n in names:
+        size = sizes.get(n, budget)
+        if group and used + size > budget:
+            yield group
+            group, used = [], 0
+        group.append(n)
+        used += size
+    if group:
+        yield group
+
+
+def _run_outputs(
+    onnx: Any, ort: Any, model: Any, names: list[str], x: torch.Tensor
+) -> dict[str, NDArray[Any]]:
+    """``model`` run on CPU with exactly ``names`` as its outputs."""
+    probe = onnx.ModelProto()
+    probe.CopyFrom(model)
+    del probe.graph.output[:]
+    probe.graph.output.extend(onnx.helper.make_empty_tensor_value_info(n) for n in names)
+    options = ort.SessionOptions()
+    options.enable_cpu_mem_arena = False  # an arena per session keeps its peak until exit
+    session = ort.InferenceSession(
+        probe.SerializeToString(), options, providers=["CPUExecutionProvider"]
+    )
+    feed = {session.get_inputs()[0].name: _as_input(x, session)}
+    return dict(zip(names, session.run(names, feed), strict=True))
 
 
 def _as_input(x: torch.Tensor, session: Any) -> NDArray[Any]:
@@ -308,6 +362,8 @@ def _stitcher(card: ModelCard, grid: SlideGrid, cfg: ParityConfig) -> Stitcher:
         return DetectionStitcher(
             card, grid, score_threshold=det.score_threshold, nms_iou=det.nms_iou
         )
+    if isinstance(card, InstanceCard):
+        return InstanceStitcher(card, grid, **cfg.instance.model_dump())
     if not isinstance(card, ClassificationCard):
         raise NotImplementedError(f"parity for {card.task} models is not supported yet")
     return HeatmapStitcher(card, grid)
@@ -336,8 +392,8 @@ def _accumulate(
             acc["inter"] += shapely.intersection(a, b).area
             acc["ref"] += a.area
             acc["cand"] += b.area
-        elif isinstance(card, DetectionCard):
-            r, k = _class_boxes(ref.detections, c.id), _class_boxes(cand.detections, c.id)
+        elif isinstance(card, (DetectionCard, InstanceCard)):
+            r, k = _class_shapes(ref, c.id), _class_shapes(cand, c.id)
             acc["tp"] += _matches(r, k, iou)
             acc["nr"] += len(r)
             acc["nc"] += len(k)
@@ -353,12 +409,12 @@ def _finish(card: ModelCard, pooled: dict[str, Any]) -> dict[str, dict[str, floa
     background = getattr(card, "background_id", None)
     for c in card.classes:
         acc = pooled[c.name]
+        if c.id == background and not isinstance(card, ClassificationCard):
+            continue
         if isinstance(card, SegmentationCard):
-            if c.id == background:
-                continue
             total = acc["ref"] + acc["cand"]
             out.setdefault("dice_min", {})[c.name] = 1.0 if total == 0 else 2 * acc["inter"] / total
-        elif isinstance(card, DetectionCard):
+        elif isinstance(card, (DetectionCard, InstanceCard)):
             denominator = acc["nr"] + acc["nc"]
             out.setdefault("f1_min", {})[c.name] = (
                 1.0 if denominator == 0 else 2 * acc["tp"] / denominator
@@ -373,22 +429,22 @@ def _finish(card: ModelCard, pooled: dict[str, Any]) -> dict[str, dict[str, floa
     return out
 
 
-def _class_boxes(detections: Detections, class_id: int) -> NDArray[np.float64]:
-    return np.asarray(detections.boxes[detections.labels == class_id])
+def _class_shapes(result: StitchResult, class_id: int) -> NDArray[np.object_]:
+    """A class's objects as shapely geometries: detection boxes, or instance polygons."""
+    if result.instances is not None:
+        found = result.instances
+        return np.asarray(found.geometry[found.class_id == class_id])
+    d = result.detections
+    return np.asarray(shapely.box(*np.asarray(d.boxes[d.labels == class_id]).T))
 
 
-def _matches(ref: NDArray[np.float64], cand: NDArray[np.float64], iou: float) -> int:
+def _matches(ref: NDArray[np.object_], cand: NDArray[np.object_], iou: float) -> int:
     """One-to-one matches by IoU >= ``iou``, greedy from the highest IoU."""
     if len(ref) == 0 or len(cand) == 0:
         return 0
-    tree = shapely.STRtree(shapely.box(*cand.T))
-    i, j = tree.query(shapely.box(*ref.T), predicate="intersects")
-    lo = np.maximum(ref[i, :2], cand[j, :2])
-    hi = np.minimum(ref[i, 2:], cand[j, 2:])
-    inter = np.clip(hi - lo, 0, None).prod(1)
-    ref_area = (ref[:, 2:] - ref[:, :2]).prod(1)
-    cand_area = (cand[:, 2:] - cand[:, :2]).prod(1)
-    overlap = inter / (ref_area[i] + cand_area[j] - inter)
+    i, j = shapely.STRtree(cand).query(ref, predicate="intersects")
+    inter = shapely.area(shapely.intersection(ref[i], cand[j]))
+    overlap = inter / (shapely.area(ref[i]) + shapely.area(cand[j]) - inter)
     used_r: set[int] = set()
     used_c: set[int] = set()
     for k in np.argsort(-overlap):
