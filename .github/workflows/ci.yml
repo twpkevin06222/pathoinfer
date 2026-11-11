@@ -13,7 +13,7 @@ concurrency:
 
 env:
   # The patchology commit pathoinfer is tested against; bump it with patchology changes.
-  PATCHOLOGY_REF: 8afcb74ecdb521561d4353b8abc102b0db8dd6a5
+  PATCHOLOGY_REF: 2ada86fa98189f3673ae15ef720d22253228e196
   PYTHONUNBUFFERED: "1"
 
 jobs:
