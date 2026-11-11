@@ -17,8 +17,9 @@ config or output formats; the entry says so.
   probability) and `nucleus_probability`. New card variant `InstanceCard` (schema stays
   v1; existing cards are unchanged), config section `instance:`
   (`examples/instance.yaml`), fixture `tiny_nuclei`. New core dependencies:
-  `scikit-image` (the watershed) and `scipy`. Parity checks do not support instance
-  models yet.
+  `scikit-image` (the watershed) and `scipy`. `convert parity` scores instance models
+  like detection (F1 and count difference per type, nuclei matched by polygon IoU), with
+  the `instance:` settings in the parity config.
 
 - `segmentation.background_classes` counts classes as background, and
   `segmentation.class_map` renames and merges classes: each key is an output name, its
@@ -130,6 +131,10 @@ config or output formats; the entry says so.
 
 ### Fixed
 
+- A failing `convert parity` on a large ONNX model could exhaust host memory: the
+  worst-layer report fetched every intermediate tensor of both graphs at once (60 GB for
+  HoVer-Net on 8 tiles). It now fetches them in groups of about 1 GB per graph, without
+  ONNX Runtime's CPU arena (11 GB peak for HoVer-Net), and reports the same layers.
 - `serve triton-repo` copied only an ONNX model's graph, not its external weights, so
   models over 2 GB failed to load in Triton. The files the graph references are now
   copied beside it under the names it records (`registry.onnx_info.external_data_files`).

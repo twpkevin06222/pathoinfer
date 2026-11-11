@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import shapely
 import torch
 
 from pathoinfer.cli import main
@@ -126,6 +127,27 @@ def test_broken_conversion_fails_and_names_classes_and_layers(
     assert "FAIL" in report.summary()
 
 
+def test_layer_errors_are_the_same_in_bounded_groups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    card, folder = load_model(str(TINY))
+    bad = broken(tmp_path / "bad")
+    images = np.random.default_rng(0).integers(0, 256, (2, 16, 16, 3), np.uint8)
+    runs: list[list[str]] = []
+    real = parity._run_outputs
+    monkeypatch.setattr(
+        parity,
+        "_run_outputs",
+        lambda onnx, ort, m, names, x: runs.append(names) or real(onnx, ort, m, names, x),
+    )
+    whole = parity.layer_errors(card, folder, bad / card.file, images, top=99)
+    assert len(runs) == 2  # every tensor in one group, one run per graph
+    runs.clear()
+    split = parity.layer_errors(card, folder, bad / card.file, images, top=99, budget_bytes=1)
+    assert all(len(names) == 1 for names in runs) and len(runs) == 2 * len(whole)
+    assert split == whole and whole[0][0] == "logits"
+
+
 def test_parity_is_reproducible(tmp_path: Path, slide: Path) -> None:
     to_fp16(TINY, tmp_path / "fp16")
     a = parity.check(TINY, tmp_path / "fp16", parity_config(slide))
@@ -190,7 +212,7 @@ def test_auc(labels: list[int], scores: list[float], expected: float) -> None:
 def test_detection_matching_is_one_to_one() -> None:
     ref = np.array([[0, 0, 10, 10], [20, 20, 30, 30]], float)
     cand = np.array([[1, 1, 11, 11], [0, 0, 10, 10], [50, 50, 60, 60]], float)
-    assert parity._matches(ref, cand, 0.5) == 1
+    assert parity._matches(shapely.box(*ref.T), shapely.box(*cand.T), 0.5) == 1
 
 
 class Fake:
@@ -291,3 +313,41 @@ def test_mlflow_registration_with_an_alias(
     )
     card, _ = load_model("models:/tiny-seg@fp16-test", cache_dir=tmp_path / "cache")
     assert card.provenance.parity is not None
+
+
+def test_instance_metrics_through_the_stitcher() -> None:
+    from tests.stitch import test_instance as inst
+    from tests.stitch.test_segmentation import grid
+
+    slide = grid()
+    images = np.zeros((len(slide.tiles), 1, 1, 3), np.uint8)
+    card = inst.card()
+    full = inst.ideal_outputs(slide)
+    # The candidate misses one lymphocyte (type 2): its nucleus pixels become background.
+    missing = dict(full)
+    missing_np = full["np"].clone()
+    nucleus, types = inst.nucleus_map(slide)
+    lost = int(np.flatnonzero(types == 2)[-1])  # a lymphocyte inside one tile
+    for k, s in enumerate(slide.tiles):
+        crop = nucleus[s.ym : s.ym + inst.TILE, s.xm : s.xm + inst.TILE] == lost
+        missing_np[k, 0][torch.from_numpy(crop)] = 10.0
+        missing_np[k, 1][torch.from_numpy(crop)] = -10.0
+    missing["np"] = missing_np
+
+    def runtime(outputs: dict[str, torch.Tensor]) -> Fake:
+        state = {"i": 0}
+
+        def fn(batch: torch.Tensor) -> dict[str, torch.Tensor]:
+            start = state["i"]
+            state["i"] = (start + len(batch)) % len(slide.tiles)
+            return {k: v[start : start + len(batch)] for k, v in outputs.items()}
+
+        return Fake(fn)
+
+    cfg = ParityConfig(slides="unused", iou=0.5)
+    same, _ = parity.compare(card, runtime(full), runtime(full), [(slide, images)], cfg)
+    assert same["f1_min"] == {"tumour": 1.0, "lymphocyte": 1.0}  # background is not scored
+    worse, _ = parity.compare(card, runtime(full), runtime(missing), [(slide, images)], cfg)
+    assert worse["f1_min"]["tumour"] == 1.0
+    assert worse["f1_min"]["lymphocyte"] == pytest.approx(2 * 1 / 3)
+    assert worse["count_diff_max"]["lymphocyte"] == pytest.approx(0.5)
