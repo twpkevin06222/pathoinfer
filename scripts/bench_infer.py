@@ -28,6 +28,8 @@ def configs(framework: str, args: argparse.Namespace) -> list[dict[str, Any]]:
     devices = ["cpu", "cuda"] if torch.cuda.is_available() and not args.cpu_only else ["cpu"]
     if framework == "onnx":
         return [{"device": d, "tensorrt": args.tensorrt and d == "cuda"} for d in devices]
+    if framework == "tensorrt":  # a plan (convert trt): CUDA only, its precision is the graph's
+        return [{"device": "cuda"}] if "cuda" in devices else []
     autocasts: list[str | None] = [None, "bf16", "fp16"]
     return [
         {"device": d, "autocast": a} for d in devices for a in autocasts if d == "cuda" or a is None
