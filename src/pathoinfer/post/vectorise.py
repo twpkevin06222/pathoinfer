@@ -21,11 +21,12 @@ Every function works in mask pixels: pixel ``(col, row)`` covers ``[col, col+1] 
    0 and round to 0.1 px; measurements ``area_um2``,
    ``perimeter_um``, ``mean_probability``.
 
-``vectorise`` runs all four on a whole mask.
+``vectorise`` runs all four on a whole mask. ``label_pieces`` is ``regions`` for a label map
+(one piece per id, e.g. nucleus instances, so touching instances stay apart).
 """
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import Any, Literal
 
@@ -54,6 +55,7 @@ class Piece:
     class_id: int
     prob_sum: float
     pixels: int
+    extra: dict[str, float] = field(default_factory=dict)  # copied to its Feature's measurements
 
 
 def to_features(
@@ -96,6 +98,7 @@ def to_features(
                     "area_um2": float(geometry.area * slide_mpp**2),
                     "perimeter_um": float(geometry.length * slide_mpp),
                     "mean_probability": piece.prob_sum / piece.pixels,
+                    **piece.extra,
                 },
             )
         )
@@ -157,6 +160,32 @@ def regions(
         geometry = boxes[start] if stop - start == 1 else shapely.union_all(boxes[start:stop])
         component = label[start]
         pieces.append(Piece(geometry, class_id, float(sums[component]), int(sizes[component])))
+    return pieces
+
+
+def label_pieces(
+    labels: NDArray[np.integer],
+    values: NDArray[np.float32],
+    class_of: NDArray[np.int64],
+) -> list[Piece]:
+    """One piece per non-zero id of the label map ``labels``: the exact union of its pixels
+    (a MultiPolygon if they are not connected), with class ``class_of[id]`` and ``values``
+    summed over it. Ids that touch stay separate pieces sharing their border, so
+    ``to_features`` shapes that border once for both."""
+    ids: NDArray[np.int64] = np.asarray(labels, dtype=np.int64)
+    if not ids.any():
+        return []
+    count = int(ids.max()) + 1
+    sums = np.bincount(ids.ravel(), weights=values.ravel(), minlength=count)
+    sizes = np.bincount(ids.ravel(), minlength=count)
+    label, x0, y0, x1, y1 = _runs(ids)
+    boxes = shapely.box(x0, y0, x1, y1)
+    bounds = np.flatnonzero(np.diff(label)) + 1
+    pieces = []
+    for start, stop in zip(np.r_[0, bounds], np.r_[bounds, len(label)], strict=True):
+        geometry = boxes[start] if stop - start == 1 else shapely.union_all(boxes[start:stop])
+        i = int(label[start])
+        pieces.append(Piece(geometry, int(class_of[i]), float(sums[i]), int(sizes[i])))
     return pieces
 
 

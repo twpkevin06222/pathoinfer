@@ -308,7 +308,8 @@ def _stitcher(card: ModelCard, grid: SlideGrid, cfg: ParityConfig) -> Stitcher:
         return DetectionStitcher(
             card, grid, score_threshold=det.score_threshold, nms_iou=det.nms_iou
         )
-    assert isinstance(card, ClassificationCard)
+    if not isinstance(card, ClassificationCard):
+        raise NotImplementedError(f"parity for {card.task} models is not supported yet")
     return HeatmapStitcher(card, grid)
 
 

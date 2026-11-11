@@ -9,6 +9,17 @@ config or output formats; the entry says so.
 
 ### Added
 
+- A nucleus instance task (`task: instance`): HoVer-Net style models (pathotrain's
+  `cellseg` HoVer-Net, HoVer-NeXt, CellViT) give `np`, `hv` and `nt` maps, and pathoinfer
+  runs HoVer-Net's watershed per tile (`post/instances.py`, ported from pathotrain), keeps
+  each nucleus in the tile whose core holds its centroid, and writes one polygon per
+  nucleus with its type (QuPath `detection` objects), a `score` (its type's mean
+  probability) and `nucleus_probability`. New card variant `InstanceCard` (schema stays
+  v1; existing cards are unchanged), config section `instance:`
+  (`examples/instance.yaml`), fixture `tiny_nuclei`. New core dependencies:
+  `scikit-image` (the watershed) and `scipy`. Parity checks do not support instance
+  models yet.
+
 - `segmentation.background_classes` counts classes as background, and
   `segmentation.class_map` renames and merges classes: each key is an output name, its
   value a model class (renamed) or a list of them (merged), e.g.
@@ -118,6 +129,10 @@ config or output formats; the entry says so.
   `--crop`, `--downsample` and `--seed` with them.
 
 ### Fixed
+
+- `serve triton-repo` copied only an ONNX model's graph, not its external weights, so
+  models over 2 GB failed to load in Triton. The files the graph references are now
+  copied beside it under the names it records (`registry.onnx_info.external_data_files`).
 
 - The label map TIFF is a pyramid OpenSlide, fastslide and QuPath open. Its levels were
   SubIFDs, which OpenSlide (and QuPath through it) does not see, so it read one level

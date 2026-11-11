@@ -1,0 +1,45 @@
+# Nucleus instance run (HoVer-Net style models, e.g. pathotrain's cellseg export):
+# validate with `pathoinfer validate`, run with `pathoinfer run`.
+# Relative paths are relative to the working directory.
+task: instance
+model: models/hovernet            # model folder, ONNX file, models:/NAME@ALIAS or hf://ORG/REPO
+slides: slides.csv                # a path, a glob, a list file (.txt, .csv/.parquet with a
+                                  # `path` column) or a YAML list of any of these
+resume: true                      # skip slides finished with the same settings
+
+# Tile size and mpp come from the model; slides without a resolution are refused.
+tiling:
+  backend: openslide
+  icc: true
+  overlap: null                   # nuclei up to about the overlap are reported exactly once
+  min_tissue_fraction: 0.0
+  tissue: {method: triangle}
+  artifacts: {pen: true, blur: false}
+
+runtime:
+  device: auto
+  batch_size: 32
+  tensorrt: true
+  autocast: null
+
+loader:
+  num_workers: 4
+  prefetch_factor: 2
+
+instance:                         # HoVer-Net's watershed (post/instances.py)
+  threshold: 0.5                  # nucleus probability
+  marker_threshold: 0.4           # HV gradient energy below this seeds a nucleus
+  min_size_px: 10                 # drop nuclei and seeds under this, in model px
+  simplify_px: 1.0                # polygon simplification, model px
+  smooth: 2                       # rounds of Chaikin smoothing; 0 keeps pixel edges
+
+outputs:
+  dir: outputs/nuclei
+  geojson: true
+  gzip: true
+  per_class: true                 # one GeoJSON per nucleus type
+  parquet: true
+  summary_format: parquet         # or json: <slide>.summary.json, class name -> numbers
+  geoparquet: false
+
+class_colors: {}

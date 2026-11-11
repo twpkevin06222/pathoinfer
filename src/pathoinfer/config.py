@@ -145,6 +145,21 @@ class DetectionOptions(_Strict):
     geometry: Literal["point", "box"] = "box"
 
 
+class InstanceOptions(_Strict):
+    """Instance (nucleus) stitching, HoVer-Net's watershed (``stitch/instance.py``):
+    nuclei are pixels whose nucleus probability is at least ``threshold``; the HV maps'
+    gradient energy below ``marker_threshold`` seeds them; blobs and seeds under
+    ``min_size_px`` model pixels are dropped. Polygons are simplified at ``simplify_px``
+    model pixels and smoothed by ``smooth`` rounds of Chaikin (0 keeps pixel edges).
+    The defaults are the values pathotrain validates with."""
+
+    threshold: float = Field(0.5, gt=0, lt=1)
+    marker_threshold: float = Field(0.4, gt=0, lt=1)
+    min_size_px: int = Field(10, ge=1)
+    simplify_px: float = Field(1.0, ge=0)
+    smooth: int = Field(2, ge=0, le=5)
+
+
 class OutputConfig(_Strict):
     """What to write per slide into ``dir`` (``docs/outputs.md``). ``parquet`` writes the
     objects table and the per-class summary, as Parquet or ``summary_format: json``.
@@ -177,6 +192,7 @@ class RunConfig(_Strict):
     loader: LoaderConfig = LoaderConfig()
     segmentation: SegmentationOptions = SegmentationOptions()
     detection: DetectionOptions = DetectionOptions()
+    instance: InstanceOptions = InstanceOptions()
     outputs: OutputConfig = OutputConfig()
     class_colors: dict[str, tuple[Byte, Byte, Byte]] = {}
     resume: bool = True

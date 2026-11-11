@@ -36,7 +36,7 @@ def model(tmp_path: Path, fixture: str) -> Path:
 
 def config(tmp_path: Path, slides: Path, task: str, /, **sections: Any) -> RunConfig:
     """``task`` picks the fixture model; ``sections`` override the config's keys."""
-    fixture = {"segmentation": "tiny_seg", "detection": "tiny_det"}[task]
+    fixture = {"segmentation": "tiny_seg", "detection": "tiny_det", "instance": "tiny_nuclei"}[task]
     data: dict[str, Any] = {
         "task": task,
         "model": str(model(tmp_path, fixture)),
@@ -118,6 +118,32 @@ def test_detection_reports_one_object_per_tile(tmp_path: Path, slides: Path) -> 
     per_class = sorted((tmp_path / "out").glob("slide_name-01.*.geojson.gz"))
     assert sum(len(features(p)) for p in per_class) == result.tiles
     assert all(f["geometry"]["type"] == "Point" for p in per_class for f in features(p))
+
+
+def test_instance_writes_typed_nucleus_polygons(tmp_path: Path, slides: Path) -> None:
+    # tiny_nuclei makes each tile's dark tissue one "nucleus" (see make_fixtures.py).
+    cfg = config(tmp_path, slides, "instance")
+    (result,) = run_batch(cfg)
+    assert result.status == "done" and result.objects > 0
+    out = tmp_path / "out"
+    assert not (out / "slide_name-01.labels.tiff").exists()  # no label map for instances
+    assert not (out / "slide_name-01.overlay.png").exists()
+    found = features(out / "slide_name-01.geojson.gz")
+    assert len(found) == result.objects
+    for f in found:
+        props = f["properties"]
+        assert props["objectType"] == "detection" and props["classification"]["name"] == "nucleus"
+        assert f["geometry"]["type"] in ("Polygon", "MultiPolygon")
+        m = props["measurements"]
+        assert {"score", "area_um2", "perimeter_um", "nucleus_probability"} <= set(m)
+        assert 0.5 <= m["score"] <= 1 and 0.5 <= m["nucleus_probability"] <= 1
+    objects = pl.read_parquet(out / "slide_name-01.objects.parquet")
+    assert len(objects) == result.objects
+    assert {"score", "area_um2", "perimeter_um", "nucleus_probability"} <= set(objects.columns)
+    assert (objects["area_um2"] > 0).all()
+    path = tmp_path / "instance.yaml"
+    path.write_text(yaml.safe_dump(cfg.model_dump(mode="json")))
+    assert main(["validate", str(path)]) == 0
 
 
 def test_resume_skips_finished_slides_until_settings_change(tmp_path: Path, slides: Path) -> None:

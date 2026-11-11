@@ -25,6 +25,7 @@ OBJECT_TYPES: dict[Task, ObjectType] = {
     "segmentation": "annotation",
     "detection": "detection",
     "classification": "annotation",
+    "instance": "detection",  # nuclei, as QuPath's cells
 }
 
 
@@ -120,7 +121,8 @@ class RunInfo:
 
 @dataclass(frozen=True)
 class ObjectTable:
-    """One row per object. ``score`` is NaN for tasks without one (segmentation);
+    """One row per object. ``score`` is NaN for tasks without one (segmentation; for
+    instances it is the mean probability of the nucleus's type);
     ``measurements`` are extra float columns in output order."""
 
     geometry: NDArray[np.object_]
@@ -149,7 +151,10 @@ class ObjectTable:
         geometry: Literal["point", "box"] = "box",
     ) -> "ObjectTable":
         """``geometry`` picks box polygons or centre points for detections. A detection's
-        ``area_um2`` is its box area either way."""
+        ``area_um2`` is its box area either way. Instances are polygons already."""
+        if result.instances is not None:
+            i = result.instances
+            return cls(i.geometry, i.class_id, i.score, i.area_um2, dict(i.measurements))
         if result.detections is not None:
             d = result.detections
             size = d.boxes[:, 2:] - d.boxes[:, :2]

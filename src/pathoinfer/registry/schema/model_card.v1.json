@@ -413,6 +413,148 @@
       "title": "InputSpec",
       "type": "object"
     },
+    "InstanceCard": {
+      "additionalProperties": false,
+      "description": "Nucleus (cell) instances and their types, HoVer-Net style (``InstanceOutput``).",
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "framework": {
+          "enum": [
+            "onnx",
+            "torch",
+            "tensorrt",
+            "safetensors"
+          ],
+          "title": "Framework",
+          "type": "string"
+        },
+        "file": {
+          "description": "Model file, relative to the model folder.",
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "precision": {
+          "default": "fp32",
+          "enum": [
+            "fp32",
+            "fp16",
+            "bf16",
+            "int8",
+            "fp8"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/InputSpec"
+        },
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/ClassInfo"
+          },
+          "minItems": 1,
+          "title": "Classes",
+          "type": "array"
+        },
+        "recommended_overlap": {
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Recommended Overlap",
+          "type": "number"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance",
+          "default": {
+            "training_run_id": null,
+            "calibration_set_hash": null,
+            "parent_model": null,
+            "parity": null,
+            "source_metadata": {}
+          }
+        },
+        "task": {
+          "const": "instance",
+          "title": "Task",
+          "type": "string"
+        },
+        "background_id": {
+          "const": 0,
+          "default": 0,
+          "description": "Type channel 0 is background (no nucleus type); never written.",
+          "title": "Background Id",
+          "type": "integer"
+        },
+        "output": {
+          "$ref": "#/$defs/InstanceOutput"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "framework",
+        "file",
+        "input",
+        "classes",
+        "recommended_overlap",
+        "task",
+        "output"
+      ],
+      "title": "InstanceCard",
+      "type": "object"
+    },
+    "InstanceOutput": {
+      "additionalProperties": false,
+      "description": "HoVer-Net style nucleus outputs, three ``(batch, C, H, W)`` tensors at the tile's\nsize, before any activation: ``np`` nucleus vs background (2 channels), ``hv`` each\npixel's horizontal and vertical offset from its nucleus's centre (2 channels, in\n[-1, 1]) and ``nt`` the nucleus type (``n_classes`` channels, channel ``i`` is class id\n``i``). Instances come from a watershed on these (``post/instances.py``).",
+      "properties": {
+        "np": {
+          "default": "np",
+          "title": "Np",
+          "type": "string"
+        },
+        "hv": {
+          "default": "hv",
+          "title": "Hv",
+          "type": "string"
+        },
+        "nt": {
+          "default": "nt",
+          "title": "Nt",
+          "type": "string"
+        },
+        "activation": {
+          "const": "logits",
+          "default": "logits",
+          "title": "Activation",
+          "type": "string"
+        },
+        "n_classes": {
+          "exclusiveMinimum": 0,
+          "title": "N Classes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "n_classes"
+      ],
+      "title": "InstanceOutput",
+      "type": "object"
+    },
     "Normalisation": {
       "additionalProperties": false,
       "description": "Per channel, in ``channel_order``: ``(pixel * scale - mean) / std``.",
@@ -881,6 +1023,7 @@
     "mapping": {
       "classification": "#/$defs/ClassificationCard",
       "detection": "#/$defs/DetectionCard",
+      "instance": "#/$defs/InstanceCard",
       "segmentation": "#/$defs/SegmentationCard",
       "vqa": "#/$defs/VqaCard"
     },
@@ -895,6 +1038,9 @@
     },
     {
       "$ref": "#/$defs/ClassificationCard"
+    },
+    {
+      "$ref": "#/$defs/InstanceCard"
     },
     {
       "$ref": "#/$defs/VqaCard"

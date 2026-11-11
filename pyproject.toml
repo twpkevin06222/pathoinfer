@@ -21,6 +21,9 @@ dependencies = [
     "pyarrow>=25.0.1",
     "pydantic>=2.14.1",
     "pyyaml>=6.0.3",
+    # Instance post-processing (post/instances.py): HoVer-Net's watershed and its filters.
+    "scikit-image>=0.26.0",
+    "scipy>=1.18.1",
     "shapely>=2",
     "tifffile>=2026.10.15",
     "torch>=2.14.0",
@@ -132,8 +135,9 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# shapely 2, ModelOpt and nvidia-ml-py (pynvml) ship no type information (types-shapely would add shapely's).
-module = ["shapely", "shapely.*", "modelopt.*", "pynvml"]
+# shapely 2, ModelOpt, nvidia-ml-py (pynvml) and scipy ship no type information (types-shapely
+# and scipy-stubs would add theirs).
+module = ["shapely", "shapely.*", "modelopt.*", "pynvml", "scipy", "scipy.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

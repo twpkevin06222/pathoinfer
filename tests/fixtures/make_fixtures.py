@@ -19,6 +19,11 @@ where the tile is redder than it is blue. So each tile owns exactly one detectio
 And ``tiny_dark/`` (torch.export, 64 px tiles): class 1 wherever a pixel is darker than
 glass (mean RGB below 0.85), so its polygons trace tissue edges exactly; alignment and
 area checks compare them with the shapes drawn on the synthetic slide.
+
+And ``tiny_nuclei/`` (torch.export, 64 px tiles, task ``instance``): HoVer-Net style
+outputs where every dark region of a tile is one "nucleus": ``np`` is tiny_dark's logits,
+``hv`` the region times an x and a y ramp (rising across it and dropping at its edge, which
+seeds the watershed), ``nt`` type 1 where dark. Run only ``nuclei()`` to add it alone.
 """
 
 import json
@@ -112,6 +117,7 @@ def main() -> None:
     detector()
     dark()
     dark_onnx()
+    nuclei()
 
 
 class TinyDet(torch.nn.Module):
@@ -162,6 +168,33 @@ def dark() -> None:
     example = torch.zeros(2, 3, 64, 64)
     program = torch.export.export(TinyDark(), (example,), dynamic_shapes=({0: batch},))
     write_folder("tiny_dark", card, "model.pt2", lambda p: torch.export.save(program, p))
+
+
+class TinyNuclei(torch.nn.Module):
+    def forward(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
+        darker = 40 * (0.85 - image.mean(1, keepdim=True))
+        logits = torch.cat([-darker, darker], 1)
+        dark = torch.sigmoid(darker)
+        ramp = torch.arange(image.shape[-1], dtype=image.dtype) / image.shape[-1]
+        hv = torch.cat([dark * ramp, dark * ramp[:, None]], 1)
+        return {"np": logits, "hv": hv, "nt": logits}
+
+
+def nuclei() -> None:
+    card = json.loads((HERE / "tiny_dark" / "model_card.json").read_text())
+    card = {k: v for k, v in card.items() if k != "output"} | {
+        "name": "tiny-nuclei",
+        "task": "instance",
+        "classes": [
+            {"id": 0, "name": "background", "color": [0, 0, 0]},
+            {"id": 1, "name": "nucleus", "color": [200, 0, 200]},
+        ],
+        "output": {"n_classes": 2},
+    }
+    batch = torch.export.Dim("batch")
+    example = torch.zeros(2, 3, 64, 64)
+    program = torch.export.export(TinyNuclei(), (example,), dynamic_shapes=({0: batch},))
+    write_folder("tiny_nuclei", card, "model.pt2", lambda p: torch.export.save(program, p))
 
 
 def dark_onnx() -> None:

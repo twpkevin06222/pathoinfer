@@ -84,7 +84,7 @@ def _features(objects: ObjectTable, ids: NDArray[np.intp], run: RunInfo) -> Iter
         c.id: json.dumps({"name": c.name, "color": list(c.color)}) for c in run.classes
     }
     columns: dict[str, NDArray[np.floating]] = {}
-    if run.task == "detection":
+    if run.task in ("detection", "instance"):
         columns["score"] = objects.score
     columns |= {"area_um2": objects.area_um2, **objects.measurements}
     names = list(columns)

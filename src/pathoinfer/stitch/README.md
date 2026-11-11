@@ -115,6 +115,29 @@ columns `boxes` (level-0 `xyxy`), `scores`, `labels` and, when the card names a
 (`io.objects.ObjectTable.from_result`), so no Python object exists per detection.
 Output formats are in `docs/outputs.md`.
 
+## Instance (nuclei)
+
+`InstanceStitcher(card, grid, threshold=0.5, marker_threshold=0.4, min_size_px=10,
+simplify_px=1.0, smooth=2)`; the run config's `instance:` section sets them.
+
+1. **Per tile.** The `np` softmax gives each pixel's nucleus probability, and HoVer-Net's
+   watershed on it and the `hv` maps gives an instance map (`post/instances.py`,
+   ported from pathotrain so inference matches its validation). Each instance takes the
+   majority non-background type of the `nt` argmax under it. Untyped instances are
+   dropped.
+2. **Ownership.** As for detections, an instance is kept only by the tile whose core holds
+   its centroid. A nucleus up to about `overlap` wide is seen whole by its owner and
+   reported once; a neighbour that sees it cut has its shifted centroid outside its core.
+   Larger objects can be cut or reported twice (warning below the card's
+   `recommended_overlap`).
+3. **Polygons.** A tile's kept instances are traced together from its label map
+   (`post/vectorise.label_pieces`, then `to_features`), so touching nuclei share one
+   border line.
+
+`finalize()` returns `StitchResult(features=[], instances=Instances(...))`: NumPy columns
+`geometry`, `class_id`, `score` (the type's mean probability), `area_um2` and
+measurements `perimeter_um`, `nucleus_probability`.
+
 ## Classification heatmaps
 
 `HeatmapStitcher(card, grid, sigma_tiles=0, thresholds=None, ...)` for a

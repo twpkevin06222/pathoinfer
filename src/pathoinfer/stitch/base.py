@@ -43,11 +43,13 @@ class Raster:
 @dataclass(frozen=True)
 class StitchResult:
     """``features`` for polygon tasks; ``detections`` (a columnar table, see
-    ``stitch.detection.Detections``) for detection, turned into features by writers."""
+    ``stitch.detection.Detections``) for detection, turned into features by writers;
+    ``instances`` (``stitch.instance.Instances``, polygons as columns) for instance."""
 
     features: list[Feature]
     rasters: dict[str, Raster] = field(default_factory=dict)
     detections: Any = None
+    instances: Any = None
 
 
 class Stitcher(Protocol):

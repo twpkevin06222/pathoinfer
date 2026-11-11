@@ -1,10 +1,10 @@
 """ModelCard: everything pathoinfer needs to run a model besides its weights.
 
 pathoinfer owns this schema. A model folder holds the model file and ``model_card.json``.
-The card is one of four task variants, discriminated by ``task``, so a detection card
-cannot carry a background class or a segmentation output. ``ModelCard`` is the three
-tile-model variants every tile code path takes; ``VqaCard`` describes a vision-language
-model folder; ``AnyCard`` is either. The published JSON Schema is
+The card is one of five task variants, discriminated by ``task``, so a detection card
+cannot carry a background class or a segmentation output. ``ModelCard`` is the four
+tile-model variants every tile code path takes (segmentation, detection, classification,
+instance); ``VqaCard`` describes a vision-language model folder; ``AnyCard`` is either. The published JSON Schema is
 ``schema/model_card.v1.json``; ``docs/model_contract.md`` documents every field.
 """
 
@@ -14,8 +14,8 @@ from typing import Annotated, Any, Literal, Self
 import matplotlib
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-TileTask = Literal["segmentation", "detection", "classification"]
-Task = Literal["segmentation", "detection", "classification", "vqa"]
+TileTask = Literal["segmentation", "detection", "classification", "instance"]
+Task = Literal["segmentation", "detection", "classification", "instance", "vqa"]
 Byte = Annotated[int, Field(ge=0, le=255)]
 Positive = Annotated[float, Field(gt=0)]
 RGB = tuple[int, int, int]
@@ -104,6 +104,23 @@ class ClassificationOutput(_Strict):
         return (self.tensor,)
 
 
+class InstanceOutput(_Strict):
+    """HoVer-Net style nucleus outputs, three ``(batch, C, H, W)`` tensors at the tile's
+    size, before any activation: ``np`` nucleus vs background (2 channels), ``hv`` each
+    pixel's horizontal and vertical offset from its nucleus's centre (2 channels, in
+    [-1, 1]) and ``nt`` the nucleus type (``n_classes`` channels, channel ``i`` is class id
+    ``i``). Instances come from a watershed on these (``post/instances.py``)."""
+
+    np: str = "np"
+    hv: str = "hv"
+    nt: str = "nt"
+    activation: Literal["logits"] = "logits"
+    n_classes: int = Field(gt=0)
+
+    def tensor_names(self) -> tuple[str, ...]:
+        return (self.np, self.hv, self.nt)
+
+
 class Parity(_Strict):
     """How a converted model matched its full-precision reference through the real
     stitchers. Written only when every metric was within its tolerance."""
@@ -188,6 +205,16 @@ class ClassificationCard(_Card):
     output: ClassificationOutput
 
 
+class InstanceCard(_Card):
+    """Nucleus (cell) instances and their types, HoVer-Net style (``InstanceOutput``)."""
+
+    task: Literal["instance"]
+    background_id: Literal[0] = Field(
+        0, description="Type channel 0 is background (no nucleus type); never written."
+    )
+    output: InstanceOutput
+
+
 class VqaInput(_Strict):
     """How the slide crops a VLM sees are made: ``tile_size`` px squares read at ``mpp``
     (ICC-converted when ``icc``); ``max_pixels`` caps what the processor resizes to."""
@@ -229,10 +256,12 @@ class VqaCard(_Strict):
 
 
 ModelCard = Annotated[
-    SegmentationCard | DetectionCard | ClassificationCard, Field(discriminator="task")
+    SegmentationCard | DetectionCard | ClassificationCard | InstanceCard,
+    Field(discriminator="task"),
 ]
 AnyCard = Annotated[
-    SegmentationCard | DetectionCard | ClassificationCard | VqaCard, Field(discriminator="task")
+    SegmentationCard | DetectionCard | ClassificationCard | InstanceCard | VqaCard,
+    Field(discriminator="task"),
 ]
 CARD: TypeAdapter[ModelCard] = TypeAdapter(ModelCard)
 ANY_CARD: TypeAdapter[AnyCard] = TypeAdapter(AnyCard)
