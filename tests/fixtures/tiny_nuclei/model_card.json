@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "name": "tiny-nuclei",
+  "version": "1",
+  "task": "instance",
+  "framework": "torch",
+  "file": "model.pt2",
+  "precision": "fp32",
+  "input": {
+    "name": "image",
+    "tile_size": 64,
+    "mpp": 0.5,
+    "channel_order": "RGB",
+    "layout": "NCHW",
+    "dtype": "float32",
+    "normalisation": {
+      "mean": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "std": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "icc": true
+  },
+  "classes": [
+    {
+      "id": 0,
+      "name": "background",
+      "color": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 1,
+      "name": "nucleus",
+      "color": [
+        200,
+        0,
+        200
+      ]
+    }
+  ],
+  "background_id": 0,
+  "recommended_overlap": 0.25,
+  "provenance": {
+    "training_run_id": "fixture"
+  },
+  "output": {
+    "n_classes": 2
+  }
+}

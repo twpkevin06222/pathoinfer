@@ -25,7 +25,7 @@ provenance only.
 
 ## Fields
 
-A card is one of four variants, chosen by `task`. Each variant accepts only its own
+A card is one of five variants, chosen by `task`. Each variant accepts only its own
 fields: a detection card has no `background_id`, and every card's `output` must match its
 task.
 
@@ -80,6 +80,20 @@ task.
 | `output.class_probs` | str or null, default null | Optional `(batch, n, n_classes)` output: each detection's probability per class |
 
 Every label is a foreground class, so a detection card has no `background_id`.
+
+### Instance
+
+Nucleus instances and their types from HoVer-Net style outputs; the watershed runs in
+pathoinfer (`post/instances.py`), not in the graph.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `background_id` | `0` (the default) | Type channel 0 is background (no nucleus type); never written |
+| `output.np` | str, default `np` | `(batch, 2, H, W)` logits: background, nucleus |
+| `output.hv` | str, default `hv` | `(batch, 2, H, W)`: each pixel's horizontal and vertical offset from its nucleus's centre, in `[-1, 1]` |
+| `output.nt` | str, default `nt` | `(batch, n_classes, H, W)` type logits; channel `i` is class id `i` |
+| `output.activation` | `logits` | All three are before any activation |
+| `output.n_classes` | int | Must equal `len(classes)` |
 
 ### Classification
 

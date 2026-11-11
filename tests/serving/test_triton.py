@@ -49,6 +49,34 @@ def test_onnx_model_becomes_a_valid_triton_model(tmp_path: Path) -> None:
     assert (model / "model_card.json").is_file()
 
 
+def test_external_weights_are_copied_beside_the_graph(tmp_path: Path) -> None:
+    # Models over 2 GB keep their weights outside the graph; Triton needs them beside it.
+    onnx = pytest.importorskip("onnx")
+    ort = pytest.importorskip("onnxruntime")
+    import numpy as np
+
+    folder = tmp_path / "big"
+    folder.mkdir()
+    (folder / "model_card.json").write_text(
+        (FIXTURES / "tiny_dark_onnx" / "model_card.json").read_text()
+    )
+    graph = onnx.load(str(FIXTURES / "tiny_dark_onnx" / "model.onnx"))
+    onnx.save(
+        graph,
+        str(folder / "model.onnx"),
+        save_as_external_data=True,
+        all_tensors_to_one_file=True,
+        location="weights.bin",  # not "<file>.data": the graph's own name must be used
+        size_threshold=0,
+    )
+    (model,) = write_repository([folder], tmp_path / "repo")
+    assert (model / "1" / "weights.bin").read_bytes() == (folder / "weights.bin").read_bytes()
+    image = np.random.default_rng(0).random((1, 3, 64, 64), dtype=np.float32)
+    want = ort.InferenceSession(str(folder / "model.onnx")).run(None, {"image": image})
+    got = ort.InferenceSession(str(model / "1" / "model.onnx")).run(None, {"image": image})
+    np.testing.assert_array_equal(got[0], want[0])
+
+
 def test_settings_and_replacement(tmp_path: Path) -> None:
     cfg = TritonRepoConfig(max_batch_size=16, preferred_batch_sizes=[16], instances=2, kind="cpu")
     write_repository([FIXTURES / "tiny_seg"], tmp_path / "repo", cfg)

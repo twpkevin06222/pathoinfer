@@ -35,11 +35,12 @@ from pathoinfer.io.writers.overlay import write_overlay
 from pathoinfer.io.writers.parquet import write_parquet, write_summary
 from pathoinfer.io.writers.tiff import write_tiff
 from pathoinfer.registry.loader import load_model
-from pathoinfer.registry.model_card import DetectionCard, ModelCard, SegmentationCard
+from pathoinfer.registry.model_card import DetectionCard, InstanceCard, ModelCard, SegmentationCard
 from pathoinfer.runtime.base import Runtime, resolve_device
 from pathoinfer.runtime.factory import make_runtime
 from pathoinfer.stitch.base import Stitcher, StitchThread
 from pathoinfer.stitch.detection import DetectionStitcher
+from pathoinfer.stitch.instance import InstanceStitcher
 from pathoinfer.stitch.segmentation import SegmentationStitcher
 from pathoinfer.tiling.dataset import make_loader
 from pathoinfer.tiling.grid import SlideGrid, build_grid
@@ -388,6 +389,17 @@ def make_stitcher(
             connectivity=cfg.segmentation.connectivity,
             keep_labels=cfg.outputs.tiff,
             class_targets=cfg.segmentation.class_remap(card).targets,
+        )
+    if isinstance(card, InstanceCard):
+        opts = cfg.instance
+        return InstanceStitcher(
+            card,
+            grid,
+            threshold=opts.threshold,
+            marker_threshold=opts.marker_threshold,
+            min_size_px=opts.min_size_px,
+            simplify_px=opts.simplify_px,
+            smooth=opts.smooth,
         )
     if not isinstance(card, DetectionCard):
         raise NotImplementedError(f"no stitcher for {card.task} yet")

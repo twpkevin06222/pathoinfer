@@ -65,7 +65,8 @@ A FeatureCollection in QuPath's format. QuPath imports it with File > Import obj
      "object_id": 0}}]}
 ```
 
-- `objectType` is `annotation` for segmentation regions and `detection` for detections.
+- `objectType` is `annotation` for segmentation regions and `detection` for detections
+  and nuclei (instance task), as QuPath's cells.
 - Geometry is a Polygon or MultiPolygon (segmentation, detection boxes) or a Point
   (detections with `geometry: point`). Coordinates are rounded to 0.1 px.
 - `measurements` holds `area_um2` and the task's measurements (below). A measurement
@@ -89,11 +90,11 @@ statistics, row groups of 100,000 rows.
 | `object_id` | int64 | Row number, also in the GeoJSON |
 | `task` | string | |
 | `class_id`, `class_name` | int64, string | From the ModelCard classes |
-| `score` | float32, null | Detection score; null for segmentation |
+| `score` | float32, null | Detection score; for nuclei the mean probability of their type; null for segmentation |
 | `centroid_x`, `centroid_y` | float64 | Geometry centroid, level-0 px |
 | `bbox_x0`, `bbox_y0`, `bbox_x1`, `bbox_y1` | float64 | Geometry bounds, level-0 px |
 | `area_um2` | float64 | Region area; a detection's box area, also for point output |
-| measurements | float64 | Segmentation: `perimeter_um`, `mean_probability` (over the region's predicted pixels, not filled holes). Detection with a `class_probs` output: `prob_<class>` per class |
+| measurements | float64 | Segmentation: `perimeter_um`, `mean_probability` (over the region's predicted pixels, not filled holes). Detection with a `class_probs` output: `prob_<class>` per class. Instance: `perimeter_um`, `nucleus_probability` (mean nucleus probability over its pixels) |
 | `geometry` | binary | WKB, level-0 px. Decode with `shapely.from_wkb` |
 | `model_name`, `model_version` | string | |
 

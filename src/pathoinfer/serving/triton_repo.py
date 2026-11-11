@@ -4,6 +4,7 @@ For each model folder (ONNX or a TensorRT plan) it writes::
 
     REPOSITORY/<card name>/config.pbtxt
     REPOSITORY/<card name>/1/model.onnx | model.plan
+    REPOSITORY/<card name>/1/<external weights>    (ONNX graphs over 2 GB; names as recorded)
     REPOSITORY/<card name>/model_card.json        (for reference; Triton ignores it)
 
 ``config.pbtxt`` is built as Triton's own ``ModelConfig`` protobuf message
@@ -131,6 +132,12 @@ def _write_model(card: ModelCard, folder: Path, repository: Path, cfg: TritonRep
     shutil.rmtree(partial, ignore_errors=True)
     (partial / "1").mkdir(parents=True)
     shutil.copyfile(folder / card.file, partial / "1" / file)
+    if card.framework == "onnx":
+        from pathoinfer.registry.onnx_info import external_data_files
+
+        # External weights keep the name the graph records, beside the renamed graph.
+        for name in external_data_files(folder / card.file):
+            shutil.copyfile(folder / name, partial / "1" / name)
     (partial / "config.pbtxt").write_text(text)
     (partial / CARD_FILE).write_text(card.model_dump_json(indent=2) + "\n")
     shutil.rmtree(target, ignore_errors=True)

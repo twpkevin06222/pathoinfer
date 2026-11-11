@@ -22,6 +22,7 @@ result, and writes:
 |---|---|---|
 | Segmentation | per-pixel class logits | one polygon per region, holes kept, seams merged |
 | Detection | boxes, scores, labels | one object per detection, each reported once across tile overlaps |
+| Instance (nuclei) | HoVer-Net maps: nucleus (`np`), distance (`hv`), type (`nt`) | one polygon per nucleus with its type, each reported once across tile overlaps |
 | Tile classification | per-tile class logits | heatmaps; lands in v0.2 |
 
 ## How it fits together
@@ -140,6 +141,27 @@ outputs:
 
 Each detection is kept by exactly one tile, so objects up to about the tile overlap wide
 are never counted twice. See [examples/detection.yaml](examples/detection.yaml).
+
+### Nucleus instances
+
+```yaml
+task: instance
+model: models/hovernet            # e.g. pathotrain's cellseg export
+slides: slides.csv
+instance:
+  threshold: 0.5                  # nucleus probability
+  marker_threshold: 0.4           # HoVer-Net's watershed seeds
+  min_size_px: 10
+outputs:
+  dir: outputs/nuclei
+  per_class: true                 # one GeoJSON per nucleus type
+```
+
+Each tile's outputs go through HoVer-Net's watershed (`post/instances.py`). A nucleus is
+kept by the one tile whose core holds its centroid, so nuclei up to about the overlap
+wide are counted once. Every nucleus is a polygon with its type, a `score` (its type's
+mean probability) and `nucleus_probability`, both usable to rank review. See
+[examples/instance.yaml](examples/instance.yaml).
 
 ### Tile classification heatmaps
 
