@@ -19,7 +19,10 @@ config or output formats; the entry says so.
   (`examples/instance.yaml`), fixture `tiny_nuclei`. New core dependencies:
   `scikit-image` (the watershed) and `scipy`. `convert parity` scores instance models
   like detection (F1 and count difference per type, nuclei matched by polygon IoU), with
-  the `instance:` settings in the parity config.
+  the `instance:` settings in the parity config. `instance.workers` (default 4) runs the
+  per-tile watershed and polygons in that many processes: 64 tiles/s on one thread, 228
+  with 8 on PanNuke tiles. It is not part of the settings hash, so changing it does not
+  re-run finished slides.
 
 - `segmentation.background_classes` counts classes as background, and
   `segmentation.class_map` renames and merges classes: each key is an output name, its

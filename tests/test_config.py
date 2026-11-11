@@ -63,9 +63,12 @@ def test_settings_hash_tracks_what_changes_outputs() -> None:
             "slides": ["other.svs"],
             "resume": False,
             "loader": base.loader.model_copy(update={"num_workers": 0}),
+            "instance": base.instance.model_copy(update={"workers": 0}),
         }
     )
     assert base.settings_hash("{}") == same.settings_hash("{}")
     changed = RunConfig.model_validate(BASE | {"detection": {"nms_iou": 0.3}})
     assert changed.settings_hash("{}") != base.settings_hash("{}")
+    threshold = RunConfig.model_validate(BASE | {"instance": {"threshold": 0.6}})
+    assert threshold.settings_hash("{}") != base.settings_hash("{}")
     assert base.settings_hash('{"version": "2"}') != base.settings_hash("{}")

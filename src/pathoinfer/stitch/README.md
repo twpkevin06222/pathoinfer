@@ -118,7 +118,16 @@ Output formats are in `docs/outputs.md`.
 ## Instance (nuclei)
 
 `InstanceStitcher(card, grid, threshold=0.5, marker_threshold=0.4, min_size_px=10,
-simplify_px=1.0, smooth=2)`; the run config's `instance:` section sets them.
+simplify_px=1.0, smooth=2, workers=0)`; the run config's `instance:` section sets them
+(there `workers` defaults to 4).
+
+`workers` > 0 runs steps 1 and 3 for each tile in that many `forkserver` processes
+(`tile_columns`; the stitcher thread keeps the softmax and the joining). At most
+`2 * workers` tiles are in flight, so the stitch queue still back-pressures the reader,
+and results are joined in submission order, so the output equals the serial one. On the
+PanNuke mosaic with an RTX 5090: 64 tiles/s on one thread, 160 with 4 processes, 228 with
+8 (each slide pays ~0.9 s to start the pool), against 279 tiles/s for the FP16 TensorRT
+plan. A worker's error is raised from the next `add` or from `finalize`.
 
 1. **Per tile.** The `np` softmax gives each pixel's nucleus probability, and HoVer-Net's
    watershed on it and the `hv` maps gives an instance map (`post/instances.py`,

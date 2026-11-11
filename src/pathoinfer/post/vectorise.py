@@ -46,6 +46,8 @@ SMOOTH_SEGMENT_PX = 4.0
 # Douglas-Peucker tolerance after smoothing, in mask pixels: far below what shows.
 SMOOTH_TOLERANCE_PX = 0.1
 
+GRID_PX = 0.1  # output coordinates snap to this level-0 grid (shapely precision)
+
 
 @dataclass
 class Piece:
@@ -86,7 +88,7 @@ def to_features(
         if geometry is None:
             continue
         geometry = shapely.transform(geometry, lambda xy: xy * level0_per_px + offset)
-        geometry = polygonal(shapely.set_precision(geometry, 0.1))
+        geometry = polygonal(shapely.set_precision(geometry, GRID_PX))
         if geometry is None:
             continue
         features.append(

@@ -134,3 +134,31 @@ def test_no_nuclei_gives_an_empty_table() -> None:
     stitcher.add(list(g.tiles), empty)
     found = stitcher.finalize().instances
     assert len(found) == 0 and found.geometry.dtype == object
+
+
+def test_worker_processes_give_the_serial_result() -> None:
+    g = grid()
+    outputs = ideal_outputs(g)
+    results = []
+    for workers in (0, 2):
+        stitcher = InstanceStitcher(card(), g, workers=workers)
+        for start in range(0, len(g.tiles), 3):  # more tiles than the 2 * workers in flight
+            batch = {k: v[start : start + 3] for k, v in outputs.items()}
+            stitcher.add(list(g.tiles[start : start + 3]), batch)
+        results.append(stitcher.finalize().instances)
+    serial, pooled = results
+    assert len(serial) > 0 and shapely.equals(serial.geometry, pooled.geometry).all()
+    centroids = [shapely.get_coordinates(shapely.centroid(r.geometry)) for r in results]
+    assert (centroids[0] == centroids[1]).all()  # the precision grid survives the pool
+    assert (serial.class_id == pooled.class_id).all() and (serial.score == pooled.score).all()
+
+
+def test_a_worker_error_reaches_the_caller() -> None:
+    g = grid()
+    outputs = ideal_outputs(g)
+    outputs["hv"] = outputs["hv"][:, :1]  # one HV channel: the watershed cannot run
+    stitcher = InstanceStitcher(card(), g, workers=2)
+    with pytest.raises(Exception):  # noqa: B017 - whatever the worker raised
+        stitcher.add(list(g.tiles), outputs)
+        stitcher.finalize()
+    assert stitcher._pool is None
