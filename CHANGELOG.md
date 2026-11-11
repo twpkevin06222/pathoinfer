@@ -131,6 +131,12 @@ config or output formats; the entry says so.
 
 ### Fixed
 
+- `convert fp16` let ONNX Runtime's converter clip weights above FP16's range (65504)
+  silently. HoVer-Net's decoder BatchNorms hold running variances up to 3e7, so its FP16
+  variant scaled them up to 22x and failed parity with F1 0. BatchNorms whose
+  parameters do not fit are now rewritten to the same affine map in a form that does
+  (mean 0, variance 1, epsilon 0); the FP16 HoVer-Net passes parity with F1 1.0. Any
+  other out-of-range weight feeding an FP16 op now raises, naming it and `--keep-fp32`.
 - A failing `convert parity` on a large ONNX model could exhaust host memory: the
   worst-layer report fetched every intermediate tensor of both graphs at once (60 GB for
   HoVer-Net on 8 tiles). It now fetches them in groups of about 1 GB per graph, without
