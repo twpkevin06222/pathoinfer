@@ -36,12 +36,14 @@ def build_plan(
     min_batch: int = 1,
     opt_batch: int = 32,
     max_batch: int = 64,
-    workspace_gb: float = 4.0,
+    workspace_gb: float | None = None,
     cache: Path = CACHE,
     device: int = 0,
 ) -> ModelCard:
     """Build (or reuse from ``cache``) a plan for the ONNX model at ``source`` on CUDA
-    device ``device`` and write it as the new model folder ``out``."""
+    device ``device`` and write it as the new model folder ``out``. ``workspace_gb`` caps
+    the scratch memory tactics may use; None leaves TensorRT's default (the GPU's memory):
+    4 GB was too little for an FP32 HoVer-Net."""
     trt = require("tensorrt", extra("trt"))
     if not 1 <= min_batch <= opt_batch <= max_batch:
         raise ValueError(
@@ -104,7 +106,11 @@ def _model_hash(model_dir: Path) -> str:
 
 
 def _build(
-    trt: Any, onnx_path: Path, card: ModelCard, batches: tuple[int, int, int], workspace_gb: float
+    trt: Any,
+    onnx_path: Path,
+    card: ModelCard,
+    batches: tuple[int, int, int],
+    workspace_gb: float | None,
 ) -> bytes:
     log = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(log)
@@ -114,7 +120,8 @@ def _build(
         errors = [str(parser.get_error(i)) for i in range(parser.num_errors)]
         raise ValueError("TensorRT could not parse the ONNX model:\n" + "\n".join(errors))
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, int(workspace_gb * 2**30))
+    if workspace_gb is not None:
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, int(workspace_gb * 2**30))
     profile = builder.create_optimization_profile()
     size = card.input.tile_size
     shape = (3, size, size) if card.input.layout == "NCHW" else (size, size, 3)
@@ -122,5 +129,11 @@ def _build(
     config.add_optimization_profile(profile)
     plan = builder.build_serialized_network(network, config)
     if plan is None:
-        raise RuntimeError("TensorRT failed to build the plan (see its log above)")
+        hint = (
+            f"; with --workspace-gb {workspace_gb:g}, 'Could not find any implementation' means "
+            "too little workspace: raise it or leave it unset"
+            if workspace_gb is not None
+            else ""
+        )
+        raise RuntimeError(f"TensorRT failed to build the plan (see its log above){hint}")
     return bytes(plan)

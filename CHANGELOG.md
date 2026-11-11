@@ -106,6 +106,9 @@ config or output formats; the entry says so.
 
 ### Changed
 
+- `convert trt --workspace-gb` no longer defaults to 4 GB: unset, TensorRT may use the
+  GPU's memory for tactics. 4 GB failed to build an FP32 HoVer-Net ("Could not find any
+  implementation"); with a cap set, that failure now says to raise it.
 - Polygons are now the exact union of each region's pixels: areas equal pixel counts
   and holes keep their corners (before, outlines came out 1-4% too large and every hole
   lost a quarter pixel per corner). About 5x faster on noisy masks. **Segmentation

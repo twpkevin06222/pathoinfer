@@ -97,13 +97,15 @@ network may come out unquantised. During calibration ONNX Runtime may log that
 
 ## TensorRT plans (`tensorrt.py`)
 
-`pathoinfer convert trt SOURCE OUT [--batch MIN OPT MAX] [--workspace-gb 4] [--device 0]`
+`pathoinfer convert trt SOURCE OUT [--batch MIN OPT MAX] [--workspace-gb GB] [--device 0]`
 
 A plan is a serialised TensorRT engine for one GPU architecture and TensorRT version.
 It is built as a strongly typed network, so its precision is the ONNX graph's: FP32,
 FP16 from `convert fp16`, or INT8/FP8 from `convert ptq`. The plan therefore computes
 what parity checks. One optimisation profile covers batch sizes `MIN` to `MAX`, tuned
-for `OPT`. Runs must use a `batch_size` within it.
+for `OPT`. Runs must use a `batch_size` within it. `--workspace-gb` caps the memory
+TensorRT's tactics may use while building; unset, it is the GPU's memory (4 GB was too
+little for an FP32 HoVer-Net: "Could not find any implementation").
 
 Built plans are cached in `~/.cache/pathoinfer/plans`, keyed by model hash, GPU,
 compute capability, TensorRT version, precision and profile, so building the same plan
