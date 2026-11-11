@@ -91,6 +91,50 @@ def test_fp16_keeps_external_weights_beside_the_graph(
         assert np.allclose(np.asarray(got[name]), np.asarray(value), atol=0.05)
 
 
+def wide_batchnorm(out: Path, spread: float) -> Path:
+    """tiny_seg with ``hidden`` scaled by ``spread`` and a BatchNorm undoing it: running
+    variance ``spread**2``, beyond FP16's range for a large ``spread`` (as in HoVer-Net)."""
+    card, folder = load_model(str(TINY))
+    model = onnx.load(folder / card.file)
+    w1 = next(t for t in model.graph.initializer if t.name == "w1")
+    w1.CopyFrom(onnx.numpy_helper.from_array(onnx.numpy_helper.to_array(w1) * spread, "w1"))
+    model.graph.node[0].output[0] = "raw"
+    model.graph.node.insert(
+        1, onnx.helper.make_node("BatchNormalization", ["raw", "g", "b", "mu", "var"], ["hidden"])
+    )
+    params = {"g": 1.0, "b": 0.1, "mu": 0.0, "var": spread**2}
+    model.graph.initializer.extend(
+        onnx.numpy_helper.from_array(np.full(4, v, np.float32), n) for n, v in params.items()
+    )
+    write_variant(card, out, lambda p: onnx.save(model, p), precision="fp32", version="1+bn")
+    return out
+
+
+def test_fp16_fits_batchnorms_beyond_its_range(tmp_path: Path) -> None:
+    from pathoinfer.runtime.local.onnx import OnnxRuntime
+
+    source = wide_batchnorm(tmp_path / "bn", spread=3000.0)  # variance 9e6 > 65504
+    card = to_fp16(source, tmp_path / "fp16")
+    side = card.input.tile_size
+    tiles = torch.randint(0, 256, (2, side, side, 3), dtype=torch.uint8)
+    reference, _ = load_model(str(source))
+    want = OnnxRuntime(reference, source / "model.onnx", device="cpu").predict(tiles)
+    got = OnnxRuntime(card, tmp_path / "fp16" / "model.onnx", device="cpu").predict(tiles)
+    for name, value in want.items():  # clipped to 65504, the variance scaled logits ~12x
+        assert np.allclose(np.asarray(got[name]), np.asarray(value), atol=0.05)
+
+
+def test_fp16_refuses_other_weights_beyond_its_range(tmp_path: Path) -> None:
+    card, folder = load_model(str(TINY))
+    model = onnx.load(folder / card.file)
+    w2 = next(t for t in model.graph.initializer if t.name == "w2")
+    w2.CopyFrom(onnx.numpy_helper.from_array(onnx.numpy_helper.to_array(w2) * 1e5, "w2"))
+    write_variant(card, tmp_path / "big", lambda p: onnx.save(model, p), version="1+big")
+    with pytest.raises(ValueError, match=r"w2 \(Conv"):
+        to_fp16(tmp_path / "big", tmp_path / "fp16")
+    to_fp16(tmp_path / "big", tmp_path / "kept", keep_fp32_ops=["Conv"])
+
+
 def test_fp16_io_changes_the_input_dtype(tmp_path: Path) -> None:
     card = to_fp16(TINY, tmp_path / "fp16", keep_io_types=False)
     assert card.input.dtype == "float16"
