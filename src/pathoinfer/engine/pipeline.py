@@ -400,6 +400,7 @@ def make_stitcher(
             min_size_px=opts.min_size_px,
             simplify_px=opts.simplify_px,
             smooth=opts.smooth,
+            workers=opts.workers,
         )
     if not isinstance(card, DetectionCard):
         raise NotImplementedError(f"no stitcher for {card.task} yet")

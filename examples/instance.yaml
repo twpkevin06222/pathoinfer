@@ -32,6 +32,7 @@ instance:                         # HoVer-Net's watershed (post/instances.py)
   min_size_px: 10                 # drop nuclei and seeds under this, in model px
   simplify_px: 1.0                # polygon simplification, model px
   smooth: 2                       # rounds of Chaikin smoothing; 0 keeps pixel edges
+  workers: 4                      # processes for the per-tile watershed; 0: one thread
 
 outputs:
   dir: outputs/nuclei

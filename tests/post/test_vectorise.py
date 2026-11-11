@@ -4,6 +4,7 @@ import pytest
 import shapely
 
 from pathoinfer.post.vectorise import (
+    Piece,
     fill_holes,
     merge,
     regions,
@@ -135,6 +136,18 @@ def test_hole_is_kept_when_another_class_leaves_it_through_a_corner() -> None:
     by_class = {p.class_id: p.geometry for p in filled}
     assert by_class[1].intersection(by_class[2]).area == 0
     assert by_class[1].area == (labels == 1).sum()
+
+
+def test_filling_a_hole_drops_the_pieces_own_island_in_it() -> None:
+    """A region merged across bands can be one MultiPolygon holding a same-class island in
+    its own hole (a real slide: 4 such islands in a 58k-hole region). Filling the hole
+    must drop the island, or it lies inside the filled polygon: an invalid geometry."""
+    region = shapely.box(0, 0, 10, 10).difference(shapely.box(3, 3, 7, 7))
+    island = shapely.box(4, 4, 5, 5)
+    piece = Piece(shapely.MultiPolygon([region, island]), 1, 85.0, 85)
+    (filled,), holes = fill_holes([piece], max_px=100)
+    assert filled.geometry.is_valid and filled.geometry.equals(shapely.box(0, 0, 10, 10))
+    assert len(holes) == 1 and holes[0].geometry.area == 16
 
 
 def test_a_simplified_border_never_runs_through_a_junction() -> None:

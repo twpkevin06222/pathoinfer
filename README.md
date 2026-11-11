@@ -152,6 +152,7 @@ instance:
   threshold: 0.5                  # nucleus probability
   marker_threshold: 0.4           # HoVer-Net's watershed seeds
   min_size_px: 10
+  workers: 4                      # processes for the per-tile watershed
 outputs:
   dir: outputs/nuclei
   per_class: true                 # one GeoJSON per nucleus type

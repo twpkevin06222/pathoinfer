@@ -151,13 +151,15 @@ class InstanceOptions(_Strict):
     gradient energy below ``marker_threshold`` seeds them; blobs and seeds under
     ``min_size_px`` model pixels are dropped. Polygons are simplified at ``simplify_px``
     model pixels and smoothed by ``smooth`` rounds of Chaikin (0 keeps pixel edges).
-    The defaults are the values pathotrain validates with."""
+    The defaults are the values pathotrain validates with. ``workers`` processes run the
+    per-tile watershed (0: on the stitcher thread); it never changes the output."""
 
     threshold: float = Field(0.5, gt=0, lt=1)
     marker_threshold: float = Field(0.4, gt=0, lt=1)
     min_size_px: int = Field(10, ge=1)
     simplify_px: float = Field(1.0, ge=0)
     smooth: int = Field(2, ge=0, le=5)
+    workers: int = Field(4, ge=0)
 
 
 class OutputConfig(_Strict):
@@ -207,6 +209,7 @@ class RunConfig(_Strict):
                 "resume": True,
                 "loader": True,
                 "runtime": {"device", "batch_size"},
+                "instance": {"workers"},
             },
         )
         blob = json.dumps({"settings": settings, "card": json.loads(card_json)}, sort_keys=True)

@@ -7,7 +7,7 @@ FROM python:3.12-slim
 
 ARG TORCH_INDEX=cpu
 # The patchology commit pathoinfer is tested against (as in .github/workflows/ci.yml).
-ARG PATCHOLOGY_REF=8afcb74ecdb521561d4353b8abc102b0db8dd6a5
+ARG PATCHOLOGY_REF=2ada86fa98189f3673ae15ef720d22253228e196
 
 # UV_HTTP_TIMEOUT: the CUDA wheels are large and NVIDIA's index can be slow.
 ENV PYTHONUNBUFFERED=1 \
