@@ -83,10 +83,11 @@ def _features(objects: ObjectTable, ids: NDArray[np.intp], run: RunInfo) -> Iter
     classification = {
         c.id: json.dumps({"name": c.name, "color": list(c.color)}) for c in run.classes
     }
-    columns: dict[str, NDArray[np.floating]] = {}
-    if run.task in ("detection", "instance"):
-        columns["score"] = objects.score
-    columns |= {"area_um2": objects.area_um2, **objects.measurements}
+    columns: dict[str, NDArray[np.floating]] = {
+        "score": objects.score,
+        "area_um2": objects.area_um2,
+        **objects.measurements,
+    }
     names = list(columns)
     rows = zip(*(columns[k].tolist() for k in names), strict=True)
     head = f'{{"objectType":"{run.object_type}","isLocked":false,"classification":'

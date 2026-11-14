@@ -53,9 +53,21 @@ def test_score_histogram_counts_every_scored_object(
 def test_min_score_keeps_objects_without_scores(
     tmp_path: Path, seg_objects: ObjectTable, seg_run: RunInfo
 ) -> None:
-    write_parquet(tmp_path / "s.objects.parquet", seg_objects, seg_run)
-    write_summary(tmp_path / "s.summary.parquet", seg_objects, seg_run)
+    unscored = replace(seg_objects, score=np.full(len(seg_objects), np.nan, np.float32))
+    write_parquet(tmp_path / "s.objects.parquet", unscored, seg_run)
+    write_summary(tmp_path / "s.summary.parquet", unscored, seg_run)
     density = class_density(
         tmp_path / "*.objects.parquet", tmp_path / "*.summary.parquet", min_score=0.5
     )
     assert density["count"].to_list() == [len(seg_objects)]
+
+
+def test_min_score_filters_regions_by_mean_probability(
+    tmp_path: Path, seg_objects: ObjectTable, seg_run: RunInfo
+) -> None:
+    write_parquet(tmp_path / "s.objects.parquet", seg_objects, seg_run)
+    write_summary(tmp_path / "s.summary.parquet", seg_objects, seg_run)
+    density = class_density(
+        tmp_path / "*.objects.parquet", tmp_path / "*.summary.parquet", min_score=1.01
+    )
+    assert density["count"].to_list() == [0]

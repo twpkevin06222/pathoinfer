@@ -16,7 +16,7 @@ dependencies = [
     "nvidia-ml-py>=13.615.71",          # NVML: GPU utilisation and memory in the run summary
     "opencv-python-headless>=5.0.0.93",
     # Tiling and coordinate changes in patchology are breaking changes for pathoinfer.
-    "patchology>=0.1.0,<0.2",
+    "patchology>=0.1.1,<0.2",
     "polars>=2.1.0",
     "pyarrow>=25.0.1",
     "pydantic>=2.14.1",

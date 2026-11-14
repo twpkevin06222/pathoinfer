@@ -69,7 +69,7 @@ A FeatureCollection in QuPath's format. QuPath imports it with File > Import obj
   and nuclei (instance task), as QuPath's cells.
 - Geometry is a Polygon or MultiPolygon (segmentation, detection boxes) or a Point
   (detections with `geometry: point`). Coordinates are rounded to 0.1 px.
-- `measurements` holds `area_um2` and the task's measurements (below). A measurement
+- `measurements` holds `score`, `area_um2` and the task's measurements (below). A measurement
   without a value is left out, which QuPath reads as NaN.
 - `object_id` is the object's row in the objects Parquet table, so the two files join.
 - The top-level `properties` is a GeoJSON foreign member; QuPath ignores it.
@@ -90,7 +90,7 @@ statistics, row groups of 100,000 rows.
 | `object_id` | int64 | Row number, also in the GeoJSON |
 | `task` | string | |
 | `class_id`, `class_name` | int64, string | From the ModelCard classes |
-| `score` | float32, null | Detection score; for nuclei the mean probability of their type; null for segmentation |
+| `score` | float32, null | Detection score; for nuclei the mean probability of their type; for segmentation regions their `mean_probability`; null without one |
 | `centroid_x`, `centroid_y` | float64 | Geometry centroid, level-0 px |
 | `bbox_x0`, `bbox_y0`, `bbox_x1`, `bbox_y1` | float64 | Geometry bounds, level-0 px |
 | `area_um2` | float64 | Region area; a detection's box area, also for point output |
@@ -122,7 +122,7 @@ One row per class, classes without objects included.
 |---|---|
 | `slide_id`, `class_id`, `class_name` | |
 | `count` | Objects of the class |
-| `mean_score` | Mean detection score; null for segmentation |
+| `mean_score` | Mean `score` of the class's objects (for segmentation, an unweighted mean of `mean_probability` over regions); null without scores |
 | `total_area_um2` | Sum of `area_um2` (for segmentation, the class's tissue area) |
 | `tissue_area_um2` and the other run metadata fields | Repeated on every row |
 
@@ -137,8 +137,8 @@ run metadata once, and `classes` mapping each class name to its numbers.
   "tissue_area_um2": 33053697.7,
   "...": "the other run metadata fields",
   "classes": {
-    "tumour": {"class_id": 1, "count": 1704, "mean_score": null, "total_area_um2": 12949742.9},
-    "stroma": {"class_id": 2, "count": 1956, "mean_score": null, "total_area_um2": 12838110.4}
+    "tumour": {"class_id": 1, "count": 1704, "mean_score": 0.71, "total_area_um2": 12949742.9},
+    "stroma": {"class_id": 2, "count": 1956, "mean_score": 0.64, "total_area_um2": 12838110.4}
   }
 }
 ```
@@ -171,8 +171,8 @@ hist = score_histogram("out/*.objects.parquet", bins=20)
 ```
 
 `class_density` gives `count`, `tissue_area_mm2` and `per_mm2` per slide and class.
-`min_score` drops detections below it; segmentation objects have no score and always
-count.
+`min_score` drops objects below it (segmentation regions by their `mean_probability`);
+objects without a score always count.
 `score_histogram` gives `bin`, `lower`, `upper` and `count` per slide and class.
 
 Other questions are plain DuckDB SQL over the same files:

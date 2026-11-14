@@ -106,6 +106,16 @@ config or output formats; the entry says so.
 
 ### Changed
 
+- Segmentation regions now have a `score`: their `mean_probability` (the blended
+  probability of the region's class over its predicted pixels). GeoJSON writes it in
+  `measurements.score` for every task, and the Parquet `score` column is no longer null
+  for segmentation, so viewers that filter on `score` (patholamina, QuPath) can filter
+  regions. `mean_probability` stays. Output change: the summary's `mean_score` is now set
+  for segmentation, and `class_density(min_score=...)` now drops regions below it
+  instead of always counting them.
+- Require patchology 0.1.1 (FastSlide 0.8.3+, which reads BIF, MRXS, iSyntax and TIFF
+  slides as OpenSlide does). CI and the Docker image pin patchology's `v0.1.1` commit.
+
 - `convert trt --workspace-gb` no longer defaults to 4 GB: unset, TensorRT may use the
   GPU's memory for tactics. 4 GB failed to build an FP32 HoVer-Net ("Could not find any
   implementation"); with a cap set, that failure now says to raise it.
