@@ -340,7 +340,7 @@ def test_mlflow_registration_with_an_alias(
     tmp_path: Path, slide: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     mlflow = pytest.importorskip("mlflow")
-    if importlib.util.find_spec("mlflow.store.db") is None:
+    if importlib.util.find_spec("sqlalchemy") is None:  # mlflow-skinny ships store.db too
         pytest.skip("a local sqlite registry needs full mlflow; mlflow-skinny talks to a server")
     monkeypatch.chdir(tmp_path)  # MLflow puts default artifact roots in the working dir
     uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
