@@ -25,9 +25,9 @@ def test_colour_overrides_apply_and_unknown_classes_fail() -> None:
         RunInfo.create(det.card(), seg.grid(), "m", colors={"tumor": (1, 2, 3)})
 
 
-def test_segmentation_table_has_no_scores(seg_objects: ObjectTable) -> None:
+def test_segmentation_scores_are_mean_probabilities(seg_objects: ObjectTable) -> None:
     assert len(seg_objects) == 2
-    assert np.isnan(seg_objects.score).all()
+    np.testing.assert_allclose(seg_objects.score, seg_objects.measurements["mean_probability"])
     assert set(seg_objects.measurements) == {"perimeter_um", "mean_probability"}
     np.testing.assert_allclose(
         seg_objects.area_um2, shapely.area(seg_objects.geometry) * seg.SLIDE_MPP**2, rtol=1e-6

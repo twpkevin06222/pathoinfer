@@ -61,7 +61,7 @@ def test_wkb_decodes_to_the_same_shapes(
         frame.select("bbox_x0", "bbox_y0", "bbox_x1", "bbox_y1").to_numpy(),
         shapely.bounds(decoded),
     )
-    assert frame["score"].null_count() == len(frame)
+    np.testing.assert_allclose(frame["score"], frame["mean_probability"], rtol=1e-6)
 
 
 def test_row_groups_hold_about_100k_rows(tmp_path: Path, det_run: RunInfo) -> None:

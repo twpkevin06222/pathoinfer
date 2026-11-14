@@ -121,8 +121,9 @@ class RunInfo:
 
 @dataclass(frozen=True)
 class ObjectTable:
-    """One row per object. ``score`` is NaN for tasks without one (segmentation; for
-    instances it is the mean probability of the nucleus's type);
+    """One row per object. ``score``: the detection score; for regions (segmentation)
+    their ``mean_probability``, for instances the mean probability of the nucleus's
+    type; NaN for objects without one;
     ``measurements`` are extra float columns in output order."""
 
     geometry: NDArray[np.object_]
@@ -177,7 +178,9 @@ class ObjectTable:
         return cls(
             np.array([f.geometry for f in features] or [], dtype=object),
             np.array([f.class_id for f in features], np.int64),
-            np.full(len(features), np.nan, np.float32),
+            np.array(
+                [f.measurements.get("mean_probability", np.nan) for f in features], np.float32
+            ),
             np.array([f.measurements.get("area_um2", np.nan) for f in features], np.float64),
             {k: np.array([f.measurements[k] for f in features], np.float64) for k in keys},
         )

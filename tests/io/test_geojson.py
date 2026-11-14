@@ -39,7 +39,9 @@ def test_segmentation_reads_back_as_the_same_polygons(
     props = data["features"][0]["properties"]
     assert props["objectType"] == "annotation" and props["isLocked"] is False
     assert props["classification"] == {"name": "tumor", "color": list(seg_run.classes[0].color)}
-    assert set(props["measurements"]) == {"area_um2", "perimeter_um", "mean_probability"}
+    measurements = props["measurements"]
+    assert set(measurements) == {"score", "area_um2", "perimeter_um", "mean_probability"}
+    assert measurements["score"] == pytest.approx(measurements["mean_probability"], rel=1e-6)
     assert not list(tmp_path.glob("*.partial"))
 
 

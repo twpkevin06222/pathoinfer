@@ -18,8 +18,8 @@ def class_density(
     objects: str | Path, summaries: str | Path, min_score: float | None = None
 ) -> pl.DataFrame:
     """Objects per class per slide, and per mm² of tissue. Classes with no objects get 0.
-    ``min_score`` drops scored objects (detections) below it; unscored objects
-    (segmentation) always count."""
+    ``min_score`` drops scored objects (detections, and regions by their
+    ``mean_probability``) below it; unscored objects always count."""
     return _query(
         """
         WITH counts AS (
